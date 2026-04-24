@@ -8,9 +8,10 @@ export async function startServerFromCli(argv = process.argv): Promise<void> {
     .option('-c, --config <path>', 'path to a JSON or YAML config file')
     .option('--address <address>', 'address to bind')
     .option('-p, --port <port>', 'port to bind')
+    .option('-v, --verbose', 'log every document event')
 
   program.parse(argv)
-  const options = program.opts<{ config?: string; address?: string; port?: string }>()
+  const options = program.opts<{ config?: string; address?: string; port?: string; verbose?: boolean }>()
   const config = await loadServerConfig({
     configPath: options.config,
     env: {
@@ -19,6 +20,7 @@ export async function startServerFromCli(argv = process.argv): Promise<void> {
       ...(options.port ? { ACCORD_PORT: options.port } : {}),
     },
   })
+  if (options.verbose) config.verbose = true
 
   if (shouldWarnForUnauthenticatedBind(config.address)) {
     console.warn(

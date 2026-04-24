@@ -16,6 +16,7 @@ export interface AccordServerConfig {
     storageDir: string
   }
   quiet: boolean
+  verbose: boolean
 }
 
 export interface LoadServerConfigOptions {
@@ -41,6 +42,7 @@ export function defaultServerConfig(): AccordServerConfig {
       storageDir: DEFAULT_BINARY_STORAGE_DIR,
     },
     quiet: false,
+    verbose: false,
   }
 }
 

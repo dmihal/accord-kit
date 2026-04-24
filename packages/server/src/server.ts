@@ -1,5 +1,5 @@
 import { SQLite } from '@hocuspocus/extension-sqlite'
-import { Server, type Hocuspocus } from '@hocuspocus/server'
+import { Server, type Extension, type Hocuspocus } from '@hocuspocus/server'
 import type { AccordServerConfig } from './config.js'
 import { createDocumentsRouteExtension } from './routes.js'
 
@@ -7,19 +7,26 @@ export function createAccordServer(config: AccordServerConfig): Server {
   const sqlite = new SQLite({
     database: config.persistence.path,
   })
+
+  const extensions: Extension[] = [
+    createDocumentsRouteExtension({
+      documentIds: new Set(),
+      getPersistedDocumentIds: () => listPersistedDocumentIds(sqlite),
+    }),
+    sqlite,
+  ]
+
+  if (config.verbose) {
+    extensions.unshift(createVerboseLogger())
+  }
+
   const server = new Server({
     address: config.address,
     port: config.port,
     quiet: config.quiet,
     debounce: 100,
     maxDebounce: 500,
-    extensions: [
-      createDocumentsRouteExtension({
-        documentIds: new Set(),
-        getPersistedDocumentIds: () => listPersistedDocumentIds(sqlite),
-      }),
-      sqlite,
-    ],
+    extensions,
   })
 
   patchListenHost(server)
@@ -38,6 +45,27 @@ function listPersistedDocumentIds(sqlite: SQLite): string[] {
       return null
     })
     .filter((documentId: string | null): documentId is string => documentId !== null)
+}
+
+function createVerboseLogger(): Extension {
+  const tag = () => `[${new Date().toISOString()}]`
+  return {
+    onConnect: async ({ documentName, context }) => {
+      console.log(tag(), 'connect  ', documentName, context?.user?.name ?? '')
+    },
+    onDisconnect: async ({ documentName, context }) => {
+      console.log(tag(), 'disconnect', documentName, context?.user?.name ?? '')
+    },
+    onLoadDocument: async ({ documentName }) => {
+      console.log(tag(), 'load     ', documentName)
+    },
+    onStoreDocument: async ({ documentName }) => {
+      console.log(tag(), 'store    ', documentName)
+    },
+    onChange: async ({ documentName, update }) => {
+      console.log(tag(), 'change   ', documentName, `${update.byteLength}b`)
+    },
+  }
 }
 
 function patchListenHost(server: Server): void {
