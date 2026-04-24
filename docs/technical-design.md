@@ -5,15 +5,16 @@
 | Concern | Choice | Notes |
 |---|---|---|
 | CRDT engine | `yjs` | Y.Text for all text documents |
-| Sync server | `@hocuspocus/server` v2 | WebSocket-based, built on top of yjs |
+| Sync server | `@hocuspocus/server` v4 | WebSocket-based, built on top of yjs. Pin the latest v4.x release at implementation time. |
 | Client provider | `@hocuspocus/provider` | WebSocket client for CLI + plugin |
 | Persistence | `@hocuspocus/extension-sqlite` | SQLite only (Postgres deferred) |
 | Text diffing | `fast-diff` | Plain text → YJS delta conversion |
 | File watching | `chokidar` | Cross-platform FS watcher with debounce |
 | Awareness / presence | `y-protocols/awareness` | Built into Hocuspocus; zero extra config |
 | Editor binding | `y-codemirror.next` | CodeMirror 6 ↔ Y.Text binding |
-| Monorepo | npm workspaces | Simple, no extra tooling required |
+| Monorepo | pnpm workspaces | Strict dependency boundaries and efficient local installs |
 | Language | TypeScript throughout | Strict mode |
+| Runtime | Node.js 22+ | Required by `@hocuspocus/server` v4 |
 | Build (plugin) | esbuild | Standard Obsidian plugin toolchain |
 | Build (CLI/server) | `tsc` + optional `pkg`/`bun build` | Distributable via npm |
 
@@ -23,9 +24,20 @@
 
 ```
 accord-kit/
-├── package.json              # npm workspaces root
+├── package.json              # pnpm workspaces root
+├── pnpm-workspace.yaml
 ├── tsconfig.base.json        # Shared TypeScript config
 ├── packages/
+│   ├── core/                 # @accord-kit/core
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── paths.ts      # Document ID and safe path normalization
+│   │   │   ├── ignore.ts     # Default ignore patterns + gitignore-style matching
+│   │   │   ├── file-types.ts # Text/binary detection
+│   │   │   ├── hash.ts       # SHA-256 helpers
+│   │   │   └── diff.ts       # fast-diff → Y.Text delta
+│   │   └── package.json
+│   │
 │   ├── server/               # @accord-kit/server
 │   │   ├── src/
 │   │   │   ├── index.ts      # Entry point / CLI bootstrap
@@ -41,7 +53,6 @@ accord-kit/
 │   │   │   ├── index.ts      # CLI entry point
 │   │   │   ├── watcher.ts    # chokidar-based file watcher
 │   │   │   ├── sync.ts       # YJS doc pool + Hocuspocus providers
-│   │   │   ├── diff.ts       # fast-diff → Y.Text delta
 │   │   │   └── binary.ts     # Binary file upload/download
 │   │   └── package.json
 │   │
@@ -82,11 +93,11 @@ import { Server } from '@hocuspocus/server'
 import { SQLite } from '@hocuspocus/extension-sqlite'
 
 export function createAccordServer(config: AccordConfig) {
-  return Server.configure({
+  return new Server({
     port: config.port ?? 1234,
-    host: config.host ?? '0.0.0.0',
+    address: config.address ?? '127.0.0.1',
     extensions: [
-      new SQLite({ path: config.sqlitePath ?? './data.db' }),
+      new SQLite({ database: config.sqlitePath ?? './data.db' }),
     ],
   })
 }
@@ -134,16 +145,34 @@ Requests that fail validation are rejected with `400 Bad Request`.
 
 ### Configuration
 
-Config is loaded from a YAML or JSON file, with environment variable overrides:
+Config is loaded from a YAML or JSON file, with environment variable overrides. The server defaults to localhost-only; remote access must be explicitly enabled.
 
 ```yaml
-host: 0.0.0.0
+address: 127.0.0.1
 port: 1234
 persistence:
   path: ./data.db
 binary:
   storageDir: ./binary
 ```
+
+When `address` is set to a non-loopback interface, the server logs a startup warning because v1 has no application-level authentication. For Tailscale deployments, bind to the server's Tailscale IP when possible. Binding to `0.0.0.0` is acceptable only when OS firewall rules and Tailscale ACLs prevent public access to the port.
+
+---
+
+## Package: `@accord-kit/core`
+
+The core package contains logic shared by the server, CLI, Obsidian plugin, and tests. Shared logic must live here whenever behavior needs to match across clients.
+
+**Responsibilities:**
+- Convert local paths to root-relative document IDs using forward slashes.
+- Validate remote paths before filesystem access, rejecting absolute paths and `..` traversal.
+- Provide default ignore patterns and gitignore-style matching.
+- Classify files as text or binary.
+- Compute SHA-256 content hashes for binary sync.
+- Apply full text content to `Y.Text` using `fast-diff`.
+
+The package has no dependency on Node-only APIs except where a helper explicitly targets server/CLI usage, so browser-compatible utilities can be reused by the Obsidian plugin.
 
 ---
 
@@ -334,7 +363,7 @@ function bindEditor(view: EditorView, yText: Y.Text, awareness: Awareness) {
 }
 ```
 
-`undoManager: false` disables the YJS-managed undo stack, deferring to Obsidian's built-in undo history. Note: Obsidian's undo treats all document changes as local edits, so pressing Ctrl+Z may undo changes made by a remote client. This is an accepted v1 limitation — a shared undo stack that correctly excludes remote operations is significantly more complex.
+`undoManager: false` disables the YJS-managed undo stack, deferring to Obsidian's built-in undo history. Note: Obsidian's undo treats all document changes as local edits, so pressing Ctrl+Z may undo changes made by a remote client. This is an accepted v1 limitation and should be surfaced in plugin settings/help text. A shared undo stack that correctly excludes remote operations is deferred.
 
 ### Awareness / Cursors
 

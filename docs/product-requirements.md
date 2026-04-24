@@ -12,8 +12,8 @@ The canonical use case: an AI agent writes files to a local directory on a serve
 
 - Sync text documents (primarily Markdown) between any number of clients in real time using YJS CRDTs.
 - Support two client types: an **Obsidian plugin** for human editors and a **CLI file watcher** for AI agents and automated tooling.
-- Keep the system self-hosted and operationally simple — a single server binary, minimal configuration.
-- Defer authentication and access control to a future release; assume a trusted network (e.g. Tailscale) for now.
+- Keep the system self-hosted and operationally simple — a single server binary, minimal configuration, and a safe localhost default.
+- Defer authentication and access control to a future release; assume a trusted network (for example, Tailscale) when remote access is enabled.
 
 ## Non-Goals (v1)
 
@@ -43,10 +43,11 @@ All clients connect to the Hocuspocus server over WebSocket. The server is the s
 
 ## Packages
 
-The project is a TypeScript monorepo using npm workspaces, distributed as npm packages.
+The project is a TypeScript monorepo using pnpm workspaces, distributed as npm packages.
 
 | Package | Name | Description |
 |---|---|---|
+| Core | `@accord-kit/core` | Shared path, ignore, diff, hashing, and file-type utilities |
 | Server | `@accord-kit/server` | Hocuspocus-based sync server |
 | CLI | `@accord-kit/cli` | File-system watcher for AI agents and scripts |
 | Obsidian Plugin | `accord-kit-obsidian` | Obsidian community plugin |
@@ -84,12 +85,23 @@ Binary files (images, PDFs, etc.) are synced using **last-write-wins**: whicheve
 
 **Configuration:**
 - Persistence backend: SQLite (v1 only). Zero external dependencies.
-- Listening host and port (default: `0.0.0.0:1234`).
+- Listening address and port (default: `127.0.0.1:1234`). Remote access requires explicitly binding to a Tailscale address or `0.0.0.0`.
 
 **Persistence:**
 - SQLite: stores all document state in a single `.db` file. Suitable for single-machine or low-traffic deployments.
 
-**Authentication:** None in v1. All connections are accepted. The recommended deployment is behind [Tailscale](https://tailscale.com), which restricts server access to trusted devices without requiring application-level auth. Do not expose the server port to the public internet.
+**Authentication:** None in v1. All connections are accepted. The server must not be exposed directly to the public internet. The default bind address is `127.0.0.1`; users who need remote clients should bind to a private VPN interface such as [Tailscale](https://tailscale.com), or bind to `0.0.0.0` only when OS firewall rules and Tailscale ACLs restrict access.
+
+### Tailscale Deployment
+
+For remote Obsidian and CLI clients, the recommended v1 deployment is:
+
+1. Install Tailscale on the server and each client device.
+2. Start the AccordKit server with `address` set to the server's Tailscale IP, or to `0.0.0.0` only if the machine firewall blocks non-Tailscale access.
+3. Configure clients to connect to `ws://<tailscale-ip>:1234`.
+4. Use Tailscale ACLs to limit which devices can reach the AccordKit server port.
+
+The server should print a warning whenever it binds to a non-loopback address while application-level authentication is disabled.
 
 ---
 
@@ -126,7 +138,7 @@ Binary files (images, PDFs, etc.) are synced using **last-write-wins**: whicheve
 **Responsibilities:**
 - Provide Google Docs-style real-time collaborative editing within Obsidian.
 - Connect to an AccordKit server and keep the active document in sync with remote state.
-- Write incoming remote changes directly into the Obsidian editor buffer without disrupting the user's cursor or undo history (using the CodeMirror YJS binding).
+- Write incoming remote changes directly into the Obsidian editor buffer without disrupting the user's cursor. Obsidian undo behavior has a v1 limitation documented below.
 
 **Sync scope:**
 - Default: entire vault.
@@ -134,6 +146,9 @@ Binary files (images, PDFs, etc.) are synced using **last-write-wins**: whicheve
 
 **Conflict handling:**
 YJS merges concurrent edits silently and deterministically — no user action is required. The merged result is applied directly to the editor, consistent with Google Docs behavior. A future version may add visible merge annotations when two users edit the same region simultaneously.
+
+**Undo behavior:**
+The Obsidian plugin uses Obsidian's native undo history in v1. Remote changes may therefore be included in the local editor undo stack, so pressing undo can sometimes revert recently applied remote edits. This is accepted for v1 and should be documented in plugin settings/help text.
 
 **Configuration (Obsidian plugin settings):**
 - Server URL

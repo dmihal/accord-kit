@@ -25,6 +25,7 @@ accord-kit/
 │       ├── bootstrap.test.ts
 │       └── reconnection.test.ts
 ├── packages/
+│   ├── core/src/__tests__/       # Shared utility unit tests
 │   ├── server/src/__tests__/     # Server unit tests
 │   ├── cli/src/__tests__/        # CLI unit tests
 │   └── obsidian-plugin/src/__tests__/  # Plugin unit tests (no Obsidian runtime)
@@ -201,7 +202,7 @@ Binary tests must account for the polling interval. Default timeout for binary a
 
 ## Unit Tests
 
-### `packages/cli/src/__tests__/diff.test.ts`
+### `packages/core/src/__tests__/diff.test.ts`
 
 Tests for the `applyFileContent` diff function in isolation — no YJS server or file system needed.
 
@@ -215,14 +216,30 @@ it('handles unicode content correctly')
 it('handles large content (100KB) without timeout')
 ```
 
-### `packages/cli/src/__tests__/watcher.test.ts`
+### `packages/core/src/__tests__/paths.test.ts`
 
-Tests for path normalization, ignore pattern matching, and binary detection logic.
+Tests for path normalization and safe path validation.
 
 ```typescript
 it('normalizes Windows paths to forward-slash document IDs')
+it('rejects absolute remote paths')
+it('rejects remote paths with parent traversal')
+```
+
+### `packages/core/src/__tests__/files.test.ts`
+
+Tests for ignore pattern matching and binary detection logic.
+
+```typescript
 it('detects binary files by extension')
 it('respects ignore patterns')
+```
+
+### `packages/cli/src/__tests__/watcher.test.ts`
+
+Tests for watcher-specific event handling.
+
+```typescript
 it('debounces rapid consecutive changes to the same file')
 ```
 
@@ -240,19 +257,19 @@ Tests the sync manager's state machine (connecting, syncing, disconnected, error
 
 ```bash
 # All tests
-npm test
+pnpm test
 
 # Unit tests only (fast)
-npm run test:unit
+pnpm test:unit
 
 # Integration tests only
-npm run test:integration
+pnpm test:integration
 
 # Watch mode during development
-npm run test:watch
+pnpm test:watch
 
 # A single integration test file
-npx vitest run tests/integration/text-sync.test.ts
+pnpm vitest run tests/integration/text-sync.test.ts
 ```
 
 Integration tests are slower (real I/O, real sockets) and are tagged so CI can run unit tests on every push and integration tests on every PR.
@@ -263,9 +280,9 @@ Integration tests are slower (real I/O, real sockets) and are tagged so CI can r
 
 | Stage | Runs | Trigger |
 |---|---|---|
-| Unit tests | `npm run test:unit` | Every push |
-| Integration tests | `npm run test:integration` | Every PR |
-| Full suite | `npm test` | Pre-merge / nightly |
+| Unit tests | `pnpm test:unit` | Every push |
+| Integration tests | `pnpm test:integration` | Every PR |
+| Full suite | `pnpm test` | Pre-merge / nightly |
 
 Integration tests are expected to take 30–60 seconds. Each test file spins up its own server on a random port so tests can run in parallel without port conflicts.
 
