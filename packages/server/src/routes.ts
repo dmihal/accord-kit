@@ -20,9 +20,9 @@ export function createDocumentsRouteExtension(state: DocumentsRouteState = { doc
     async onRequest({ request, response }) {
       if (request.method !== 'GET' || request.url !== '/documents') return
 
-      const documentIds = new Set(state.documentIds)
+      const documentIds = new Set([...state.documentIds].filter(isUserDocumentId))
       for (const documentId of state.getPersistedDocumentIds?.() ?? []) {
-        documentIds.add(documentId)
+        if (isUserDocumentId(documentId)) documentIds.add(documentId)
       }
 
       const body = JSON.stringify([...documentIds].sort())
@@ -35,4 +35,8 @@ export function createDocumentsRouteExtension(state: DocumentsRouteState = { doc
       throw undefined
     },
   }
+}
+
+function isUserDocumentId(documentId: string): boolean {
+  return !documentId.startsWith('__accord_')
 }

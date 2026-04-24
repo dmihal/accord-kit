@@ -4,8 +4,8 @@ import { createDocumentsRouteExtension } from '../routes.js'
 describe('documents route', () => {
   it('lists known document IDs as JSON', async () => {
     const extension = createDocumentsRouteExtension({
-      documentIds: new Set(['notes/b.md', 'notes/a.md']),
-      getPersistedDocumentIds: () => ['notes/c.md', 'notes/a.md'],
+      documentIds: new Set(['notes/b.md', 'notes/a.md', '__accord_metadata']),
+      getPersistedDocumentIds: () => ['notes/c.md', 'notes/a.md', '__accord_internal'],
     })
     const response = {
       writeHead: vi.fn(),

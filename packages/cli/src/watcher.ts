@@ -41,6 +41,7 @@ class TextFileWatcher implements AccordWatcher {
   private readonly observedDocuments = new Set<string>()
   private readonly locallyDeletedDocuments = new Set<string>()
   private readonly recentWrites = new Map<string, string>()
+  private readonly directoryScanTimers = new Set<NodeJS.Timeout>()
   private readonly manifestUrl: string
   private metadata?: { map: Y.Map<DeletionRecord>; synced: Promise<void> }
   private watcher?: FSWatcher
@@ -70,6 +71,9 @@ class TextFileWatcher implements AccordWatcher {
     this.watcher.on('unlink', (filePath) => {
       void this.handleLocalDelete(filePath)
     })
+    this.watcher.on('addDir', (directoryPath) => {
+      this.scheduleDirectoryScan(directoryPath)
+    })
 
     await this.initializeDeletionMetadata()
     await this.scanLocalFiles()
@@ -81,6 +85,7 @@ class TextFileWatcher implements AccordWatcher {
 
   async stop(): Promise<void> {
     if (this.manifestInterval) clearInterval(this.manifestInterval)
+    for (const timer of this.directoryScanTimers) clearTimeout(timer)
     await this.watcher?.close()
     this.docPool.destroy()
   }
@@ -115,6 +120,27 @@ class TextFileWatcher implements AccordWatcher {
 
   private async scanLocalFiles(): Promise<void> {
     const filePaths = await this.walkFiles(this.config.root)
+
+    await Promise.all(
+      filePaths.map(async (filePath) => {
+        await this.handleLocalChange(filePath)
+      }),
+    )
+  }
+
+  private scheduleDirectoryScan(directoryPath: string): void {
+    if (this.shouldIgnoreAbsolutePath(directoryPath)) return
+
+    const timer = setTimeout(() => {
+      this.directoryScanTimers.delete(timer)
+      void this.scanDirectory(directoryPath)
+    }, 50)
+
+    this.directoryScanTimers.add(timer)
+  }
+
+  private async scanDirectory(directoryPath: string): Promise<void> {
+    const filePaths = await this.walkFiles(directoryPath)
 
     await Promise.all(
       filePaths.map(async (filePath) => {
@@ -255,7 +281,7 @@ class TextFileWatcher implements AccordWatcher {
   }
 
   private shouldSync(documentId: string): boolean {
-    return isTextPath(documentId) && !this.ignoreMatcher.ignores(documentId)
+    return !documentId.startsWith('__accord_') && isTextPath(documentId) && !this.ignoreMatcher.ignores(documentId)
   }
 
   private documentIdForPath(filePath: string): string | null {

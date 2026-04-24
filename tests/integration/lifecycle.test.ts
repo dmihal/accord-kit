@@ -58,4 +58,26 @@ describe('file lifecycle', () => {
     await expect(access(`${clientB.root}/.DS_Store`)).rejects.toThrow()
     await expect(access(`${clientB.root}/.accord-trash/local.md`)).rejects.toThrow()
   })
+
+  it('syncs file rename as delete plus create', async () => {
+    await clientA.write('notes/original.md', 'renamed content')
+    await waitForContent(clientB.root, 'notes/original.md', 'renamed content')
+
+    await clientA.rename('notes/original.md', 'notes/renamed.md')
+
+    await waitForContent(clientB.root, 'notes/renamed.md', 'renamed content')
+    await waitForAbsence(clientB.root, 'notes/original.md')
+    await waitForContent(clientB.root, '.accord-trash/notes/original.md', 'renamed content')
+  })
+
+  it('syncs moves between folders as delete plus create', async () => {
+    await clientA.write('a/moved.md', 'moved content')
+    await waitForContent(clientB.root, 'a/moved.md', 'moved content')
+
+    await clientA.rename('a/moved.md', 'b/moved.md')
+
+    await waitForContent(clientB.root, 'b/moved.md', 'moved content')
+    await waitForAbsence(clientB.root, 'a/moved.md')
+    await waitForContent(clientB.root, '.accord-trash/a/moved.md', 'moved content')
+  })
 })
