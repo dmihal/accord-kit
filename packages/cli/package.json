@@ -18,6 +18,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@accord-kit/core": "workspace:*"
+    "@accord-kit/core": "workspace:*",
+    "@hocuspocus/provider": "^4.0.0",
+    "chokidar": "^4.0.0",
+    "yjs": "^13.6.0"
   }
 }

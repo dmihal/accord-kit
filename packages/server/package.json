@@ -18,6 +18,7 @@
     "@accord-kit/core": "workspace:*",
     "@hocuspocus/extension-sqlite": "^4.0.0",
     "@hocuspocus/server": "^4.0.0",
+    "commander": "^13.0.0",
     "yaml": "^2.7.0"
   }
 }

@@ -1,5 +1,2 @@
-export interface WatcherConfig {
-  root: string
-  serverUrl: string
-  userName: string
-}
+export * from './sync.js'
+export * from './watcher.js'

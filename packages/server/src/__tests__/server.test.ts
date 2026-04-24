@@ -8,6 +8,9 @@ describe('createAccordServer', () => {
 
     expect(server.configuration.address).toBe('127.0.0.1')
     expect(server.configuration.port).toBe(1234)
+    expect(server.configuration.extensions.map((extension) => extension.extensionName)).toContain(
+      'AccordKitDocumentsRoute',
+    )
 
     await server.destroy()
   })
