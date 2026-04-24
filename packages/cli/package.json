@@ -5,7 +5,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "accord": "./dist/index.js"
+    "accord": "./dist/cli.js"
   },
   "exports": {
     ".": {
@@ -21,6 +21,7 @@
     "@accord-kit/core": "workspace:*",
     "@hocuspocus/provider": "^4.0.0",
     "chokidar": "^4.0.0",
+    "commander": "^13.0.0",
     "yjs": "^13.6.0"
   }
 }

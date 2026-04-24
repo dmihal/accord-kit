@@ -29,6 +29,9 @@ importers:
       chokidar:
         specifier: ^4.0.0
         version: 4.0.3
+      commander:
+        specifier: ^13.0.0
+        version: 13.1.0
       yjs:
         specifier: ^13.6.0
         version: 13.6.30
