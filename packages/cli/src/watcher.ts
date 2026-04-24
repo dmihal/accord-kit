@@ -4,10 +4,11 @@ import {
   type IgnoreMatcher,
   isTextPath,
   normalizeDocumentId,
+  resolveSafeStoragePath,
   toDocumentId,
 } from '@accord-kit/core'
 import chokidar, { type FSWatcher } from 'chokidar'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type * as Y from 'yjs'
 import { DocPool } from './sync.js'
@@ -18,6 +19,7 @@ export interface WatcherConfig {
   userName: string
   ignorePatterns?: string[]
   manifestPollMs?: number
+  deletionBehavior?: 'trash' | 'delete'
 }
 
 export interface AccordWatcher {
@@ -37,8 +39,10 @@ class TextFileWatcher implements AccordWatcher {
   private readonly docPool: DocPool
   private readonly knownDocuments = new Set<string>()
   private readonly observedDocuments = new Set<string>()
+  private readonly locallyDeletedDocuments = new Set<string>()
   private readonly recentWrites = new Map<string, string>()
   private readonly manifestUrl: string
+  private metadata?: { map: Y.Map<DeletionRecord>; synced: Promise<void> }
   private watcher?: FSWatcher
   private manifestInterval?: NodeJS.Timeout
 
@@ -63,7 +67,11 @@ class TextFileWatcher implements AccordWatcher {
     this.watcher.on('change', (filePath) => {
       void this.handleLocalChange(filePath)
     })
+    this.watcher.on('unlink', (filePath) => {
+      void this.handleLocalDelete(filePath)
+    })
 
+    await this.initializeDeletionMetadata()
     await this.scanLocalFiles()
     await this.pollManifest()
     this.manifestInterval = setInterval(() => {
@@ -90,6 +98,19 @@ class TextFileWatcher implements AccordWatcher {
     this.knownDocuments.add(documentId)
     this.attachRemoteWriter(documentId)
     await this.docPool.applyContent(documentId, content)
+  }
+
+  private async handleLocalDelete(filePath: string): Promise<void> {
+    const documentId = this.documentIdForPath(filePath)
+    if (!documentId || !this.shouldSync(documentId)) return
+    if (this.locallyDeletedDocuments.has(documentId)) {
+      this.locallyDeletedDocuments.delete(documentId)
+      return
+    }
+
+    this.knownDocuments.delete(documentId)
+    this.docPool.close(documentId)
+    await this.setDeletionRecord(documentId)
   }
 
   private async scanLocalFiles(): Promise<void> {
@@ -135,6 +156,7 @@ class TextFileWatcher implements AccordWatcher {
       documentIds.map(async (documentId) => {
         const safeDocumentId = assertSafeDocumentId(documentId)
         if (this.knownDocuments.has(safeDocumentId) || !this.shouldSync(safeDocumentId)) return
+        if (this.isDeleted(safeDocumentId)) return
 
         this.knownDocuments.add(safeDocumentId)
         const handle = this.attachRemoteWriter(safeDocumentId)
@@ -158,10 +180,73 @@ class TextFileWatcher implements AccordWatcher {
   }
 
   private async writeRemoteContent(documentId: string, content: string): Promise<void> {
+    if (this.isDeleted(documentId)) return
+
     const localPath = path.join(this.config.root, ...documentId.split('/'))
     await mkdir(path.dirname(localPath), { recursive: true })
     this.recentWrites.set(documentId, content)
     await writeFile(localPath, content, 'utf8')
+  }
+
+  private async initializeDeletionMetadata(): Promise<void> {
+    const handle = this.docPool.open('__accord_metadata')
+    this.metadata = {
+      map: handle.ydoc.getMap<DeletionRecord>('deletions'),
+      synced: handle.synced,
+    }
+    await handle.synced
+
+    this.metadata.map.observe((event) => {
+      for (const key of event.keysChanged) {
+        const record = this.metadata?.map.get(key)
+        if (record?.deleted) {
+          void this.applyRemoteDeletion(key)
+        }
+      }
+    })
+
+    await Promise.all(
+      [...this.metadata.map.entries()].map(async ([documentId, record]) => {
+        if (record.deleted) await this.applyRemoteDeletion(documentId)
+      }),
+    )
+  }
+
+  private async setDeletionRecord(documentId: string): Promise<void> {
+    if (!this.metadata) return
+    await this.metadata.synced
+    this.metadata.map.set(documentId, {
+      deleted: true,
+      deletedAt: new Date().toISOString(),
+      deletedBy: this.config.userName,
+    })
+  }
+
+  private isDeleted(documentId: string): boolean {
+    return this.metadata?.map.get(documentId)?.deleted === true
+  }
+
+  private async applyRemoteDeletion(documentId: string): Promise<void> {
+    if (!this.shouldSync(documentId)) return
+
+    const localPath = path.join(this.config.root, ...documentId.split('/'))
+    const trashPath = resolveSafeStoragePath(path.join(this.config.root, '.accord-trash'), documentId)
+
+    try {
+      if (this.config.deletionBehavior === 'delete') {
+        this.locallyDeletedDocuments.add(documentId)
+        await rm(localPath, { force: true })
+      } else {
+        await mkdir(path.dirname(trashPath), { recursive: true })
+        this.locallyDeletedDocuments.add(documentId)
+        await rename(localPath, trashPath)
+      }
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error
+    }
+
+    this.knownDocuments.delete(documentId)
+    this.docPool.close(documentId)
   }
 
   private shouldIgnoreAbsolutePath(candidatePath: string): boolean {
@@ -180,4 +265,19 @@ class TextFileWatcher implements AccordWatcher {
       return null
     }
   }
+}
+
+interface DeletionRecord {
+  deleted: boolean
+  deletedAt: string
+  deletedBy: string
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  )
 }

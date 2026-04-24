@@ -1,5 +1,5 @@
 import { startAccordWatcher, type AccordWatcher, type WatcherConfig } from '@accord-kit/cli'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -8,6 +8,7 @@ export interface TestWatcher {
   stop: () => Promise<void>
   write: (relPath: string, content: string) => Promise<void>
   read: (relPath: string) => Promise<string>
+  remove: (relPath: string) => Promise<void>
 }
 
 export async function startTestWatcher(
@@ -21,6 +22,7 @@ export async function startTestWatcher(
     userName: options.userName ?? 'Test User',
     manifestPollMs: options.manifestPollMs ?? 100,
     ignorePatterns: options.ignorePatterns,
+    deletionBehavior: options.deletionBehavior,
   })
 
   return {
@@ -36,6 +38,9 @@ export async function startTestWatcher(
     },
     read: async (relPath: string) => {
       return readFile(path.join(root, ...relPath.split('/')), 'utf8')
+    },
+    remove: async (relPath: string) => {
+      await unlink(path.join(root, ...relPath.split('/')))
     },
   }
 }
