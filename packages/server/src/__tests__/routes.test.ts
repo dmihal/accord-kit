@@ -5,6 +5,7 @@ describe('documents route', () => {
   it('lists known document IDs as JSON', async () => {
     const extension = createDocumentsRouteExtension({
       documentIds: new Set(['notes/b.md', 'notes/a.md']),
+      getPersistedDocumentIds: () => ['notes/c.md', 'notes/a.md'],
     })
     const response = {
       writeHead: vi.fn(),
@@ -20,6 +21,6 @@ describe('documents route', () => {
     ).rejects.toBeUndefined()
 
     expect(response.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({ 'Content-Type': 'application/json' }))
-    expect(response.end).toHaveBeenCalledWith('["notes/a.md","notes/b.md"]')
+    expect(response.end).toHaveBeenCalledWith('["notes/a.md","notes/b.md","notes/c.md"]')
   })
 })

@@ -6,12 +6,16 @@ export interface TestServer {
   stop: () => Promise<void>
 }
 
-export async function startTestServer(): Promise<TestServer> {
+export interface StartTestServerOptions {
+  sqlitePath?: string
+}
+
+export async function startTestServer(options: StartTestServerOptions = {}): Promise<TestServer> {
   const server = createAccordServer({
     ...defaultServerConfig(),
     port: 0,
     persistence: {
-      path: ':memory:',
+      path: options.sqlitePath ?? ':memory:',
     },
     quiet: true,
   })

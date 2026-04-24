@@ -79,4 +79,28 @@ describe('text sync', () => {
       await clientC.stop()
     }
   })
+
+  it('bootstraps documents from SQLite after a server restart', async () => {
+    const dbDir = await mkdtemp(path.join(tmpdir(), 'accord-db-'))
+    const sqlitePath = path.join(dbDir, 'sync.db')
+
+    await clientA.stop()
+    await clientB.stop()
+    await server.stop()
+
+    server = await startTestServer({ sqlitePath })
+    clientA = await startTestWatcher(server.wsUrl, { userName: 'Agent' })
+    clientB = await startTestWatcher(server.wsUrl, { userName: 'Human' })
+    await clientA.write('notes/persisted.md', 'survives restart')
+    await waitForContent(clientB.root, 'notes/persisted.md', 'survives restart')
+
+    await clientA.stop()
+    await clientB.stop()
+    await server.stop()
+
+    server = await startTestServer({ sqlitePath })
+    clientB = await startTestWatcher(server.wsUrl, { userName: 'Human' })
+
+    await waitForContent(clientB.root, 'notes/persisted.md', 'survives restart')
+  })
 })
