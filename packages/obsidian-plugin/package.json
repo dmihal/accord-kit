@@ -1,0 +1,13 @@
+{
+  "name": "accord-kit-obsidian",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@accord-kit/core": "workspace:*"
+  }
+}
