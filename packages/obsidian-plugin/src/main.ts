@@ -1,5 +1,164 @@
-export interface AccordKitSettings {
+import {
+  App,
+  FileSystemAdapter,
+  Notice,
+  Plugin,
+  PluginSettingTab,
+  Setting,
+} from 'obsidian'
+import { startAccordWatcher, type AccordWatcher } from '@accord-kit/cli'
+
+interface AccordKitSettings {
   serverUrl: string
-  binaryUrl: string
   userName: string
+  deletionBehavior: 'trash' | 'delete'
+}
+
+const DEFAULT_SETTINGS: AccordKitSettings = {
+  serverUrl: 'ws://localhost:1234',
+  userName: 'Obsidian',
+  deletionBehavior: 'trash',
+}
+
+export default class AccordKitPlugin extends Plugin {
+  settings!: AccordKitSettings
+  private statusBarItem!: HTMLElement
+  private watcherPromise: Promise<AccordWatcher | null> | null = null
+
+  async onload(): Promise<void> {
+    await this.loadSettings()
+    this.statusBarItem = this.addStatusBarItem()
+    this.addSettingTab(new AccordKitSettingTab(this.app, this))
+    this.addCommand({
+      id: 'restart-sync',
+      name: 'Restart sync',
+      callback: () => void this.restartWatcher(),
+    })
+    void this.launchWatcher()
+  }
+
+  async onunload(): Promise<void> {
+    await this.teardownWatcher()
+  }
+
+  async loadSettings(): Promise<void> {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings)
+    void this.restartWatcher()
+  }
+
+  async restartWatcher(): Promise<void> {
+    await this.teardownWatcher()
+    void this.launchWatcher()
+  }
+
+  private getVaultPath(): string | null {
+    const { adapter } = this.app.vault
+    if (adapter instanceof FileSystemAdapter) return adapter.getBasePath()
+    return null
+  }
+
+  private launchWatcher(): void {
+    const vaultPath = this.getVaultPath()
+    if (!vaultPath || !this.settings.serverUrl) {
+      this.setStatus('inactive')
+      this.watcherPromise = Promise.resolve(null)
+      return
+    }
+
+    this.setStatus('connecting')
+    this.watcherPromise = startAccordWatcher({
+      root: vaultPath,
+      serverUrl: this.settings.serverUrl,
+      userName: this.settings.userName,
+      deletionBehavior: this.settings.deletionBehavior,
+    })
+      .then((w) => {
+        this.setStatus('syncing')
+        return w
+      })
+      .catch((err: unknown) => {
+        this.setStatus('error')
+        new Notice(
+          `AccordKit: failed to connect — ${err instanceof Error ? err.message : String(err)}`,
+        )
+        this.watcherPromise = null
+        return null
+      })
+  }
+
+  private async teardownWatcher(): Promise<void> {
+    const p = this.watcherPromise
+    this.watcherPromise = null
+    const watcher = await p
+    await watcher?.stop()
+    this.setStatus('inactive')
+  }
+
+  private setStatus(state: 'inactive' | 'connecting' | 'syncing' | 'error'): void {
+    const labels: Record<typeof state, string> = {
+      inactive: '',
+      connecting: 'AccordKit: connecting…',
+      syncing: 'AccordKit ↕',
+      error: 'AccordKit: error',
+    }
+    this.statusBarItem.setText(labels[state])
+  }
+}
+
+class AccordKitSettingTab extends PluginSettingTab {
+  constructor(
+    app: App,
+    private readonly plugin: AccordKitPlugin,
+  ) {
+    super(app, plugin)
+  }
+
+  display(): void {
+    const { containerEl } = this
+    containerEl.empty()
+
+    new Setting(containerEl)
+      .setName('Server URL')
+      .setDesc('WebSocket URL of your AccordKit server (e.g. ws://localhost:1234).')
+      .addText((text) =>
+        text
+          .setPlaceholder('ws://localhost:1234')
+          .setValue(this.plugin.settings.serverUrl)
+          .onChange(async (value) => {
+            this.plugin.settings.serverUrl = value.trim()
+            await this.plugin.saveSettings()
+          }),
+      )
+
+    new Setting(containerEl)
+      .setName('User name')
+      .setDesc('Your name as displayed in collaborative editing sessions.')
+      .addText((text) =>
+        text
+          .setPlaceholder('Obsidian')
+          .setValue(this.plugin.settings.userName)
+          .onChange(async (value) => {
+            this.plugin.settings.userName = value.trim()
+            await this.plugin.saveSettings()
+          }),
+      )
+
+    new Setting(containerEl)
+      .setName('Deletion behavior')
+      .setDesc('What happens to local files when a remote deletion is received.')
+      .addDropdown((drop) =>
+        drop
+          .addOption('trash', 'Move to .accord-trash')
+          .addOption('delete', 'Delete permanently')
+          .setValue(this.plugin.settings.deletionBehavior)
+          .onChange(async (value) => {
+            this.plugin.settings.deletionBehavior = value as 'trash' | 'delete'
+            await this.plugin.saveSettings()
+          }),
+      )
+  }
 }

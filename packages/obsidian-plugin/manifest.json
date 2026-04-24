@@ -5,5 +5,5 @@
   "minAppVersion": "1.5.0",
   "description": "Real-time document sync for AccordKit.",
   "author": "David Mihal",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

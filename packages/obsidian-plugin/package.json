@@ -4,10 +4,15 @@
   "type": "module",
   "main": "main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node esbuild.mjs --prod",
+    "dev": "node esbuild.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@accord-kit/core": "workspace:*"
+    "@accord-kit/cli": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0",
+    "obsidian": "latest"
   }
 }
