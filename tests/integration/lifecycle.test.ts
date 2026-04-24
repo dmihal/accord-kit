@@ -80,4 +80,16 @@ describe('file lifecycle', () => {
     await waitForAbsence(clientB.root, 'a/moved.md')
     await waitForContent(clientB.root, '.accord-trash/a/moved.md', 'moved content')
   })
+
+  it('syncs delete then recreate at the same path', async () => {
+    await clientA.write('notes/recreated.md', 'old content')
+    await waitForContent(clientB.root, 'notes/recreated.md', 'old content')
+
+    await clientA.remove('notes/recreated.md')
+    await waitForAbsence(clientB.root, 'notes/recreated.md')
+
+    await clientA.write('notes/recreated.md', 'new content')
+
+    await waitForContent(clientB.root, 'notes/recreated.md', 'new content')
+  })
 })

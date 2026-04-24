@@ -75,6 +75,7 @@ class TextFileWatcher implements AccordWatcher {
       this.scheduleDirectoryScan(directoryPath)
     })
 
+    await waitForWatcherReady(this.watcher)
     await this.initializeDeletionMetadata()
     await this.scanLocalFiles()
     await this.pollManifest()
@@ -100,6 +101,7 @@ class TextFileWatcher implements AccordWatcher {
       return
     }
 
+    this.clearDeletionRecord(documentId)
     this.knownDocuments.add(documentId)
     this.attachRemoteWriter(documentId)
     await this.docPool.applyContent(documentId, content)
@@ -252,6 +254,12 @@ class TextFileWatcher implements AccordWatcher {
     return this.metadata?.map.get(documentId)?.deleted === true
   }
 
+  private clearDeletionRecord(documentId: string): void {
+    if (this.metadata?.map.get(documentId)?.deleted) {
+      this.metadata.map.delete(documentId)
+    }
+  }
+
   private async applyRemoteDeletion(documentId: string): Promise<void> {
     if (!this.shouldSync(documentId)) return
 
@@ -306,4 +314,10 @@ function isNotFoundError(error: unknown): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === 'ENOENT'
   )
+}
+
+function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
+  return new Promise((resolve) => {
+    watcher.once('ready', resolve)
+  })
 }
