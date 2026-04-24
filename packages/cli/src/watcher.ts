@@ -9,6 +9,7 @@ import {
 } from '@accord-kit/core'
 import chokidar, { type FSWatcher } from 'chokidar'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { get as httpGet } from 'node:http'
 import path from 'node:path'
 import type * as Y from 'yjs'
 import { DocPool } from './sync.js'
@@ -174,12 +175,7 @@ class TextFileWatcher implements AccordWatcher {
   }
 
   private async pollManifest(): Promise<void> {
-    const response = await fetch(this.manifestUrl)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch document manifest: ${response.status}`)
-    }
-
-    const documentIds = (await response.json()) as string[]
+    const documentIds = await httpGetJson<string[]>(this.manifestUrl)
     await Promise.all(
       documentIds.map(async (documentId) => {
         const safeDocumentId = assertSafeDocumentId(documentId)
@@ -319,5 +315,23 @@ function isNotFoundError(error: unknown): boolean {
 function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
   return new Promise((resolve) => {
     watcher.once('ready', resolve)
+  })
+}
+
+function httpGetJson<T>(url: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    httpGet(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Failed to fetch document manifest: ${res.statusCode}`))
+        res.resume()
+        return
+      }
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk: string) => { body += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(body) as T) } catch (e) { reject(e) }
+      })
+    }).on('error', reject)
   })
 }

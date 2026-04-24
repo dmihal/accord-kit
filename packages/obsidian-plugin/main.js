@@ -12124,6 +12124,7 @@ var esm_default = { watch, FSWatcher };
 
 // ../cli/dist/watcher.js
 var import_promises4 = require("node:fs/promises");
+var import_node_http = require("node:http");
 var import_node_path3 = __toESM(require("node:path"), 1);
 async function startAccordWatcher(config) {
   await (0, import_promises4.mkdir)(config.root, { recursive: true });
@@ -12250,11 +12251,7 @@ var TextFileWatcher = class {
     return filePaths;
   }
   async pollManifest() {
-    const response = await fetch(this.manifestUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch document manifest: ${response.status}`);
-    }
-    const documentIds = await response.json();
+    const documentIds = await httpGetJson(this.manifestUrl);
     await Promise.all(documentIds.map(async (documentId) => {
       const safeDocumentId = assertSafeDocumentId(documentId);
       if (this.knownDocuments.has(safeDocumentId) || !this.shouldSync(safeDocumentId))
@@ -12367,6 +12364,29 @@ function isNotFoundError(error) {
 function waitForWatcherReady(watcher) {
   return new Promise((resolve3) => {
     watcher.once("ready", resolve3);
+  });
+}
+function httpGetJson(url) {
+  return new Promise((resolve3, reject) => {
+    (0, import_node_http.get)(url, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Failed to fetch document manifest: ${res.statusCode}`));
+        res.resume();
+        return;
+      }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        try {
+          resolve3(JSON.parse(body));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on("error", reject);
   });
 }
 
