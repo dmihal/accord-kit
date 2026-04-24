@@ -15,6 +15,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@accord-kit/core": "workspace:*"
+    "@accord-kit/core": "workspace:*",
+    "@hocuspocus/extension-sqlite": "^4.0.0",
+    "@hocuspocus/server": "^4.0.0",
+    "yaml": "^2.7.0"
   }
 }
