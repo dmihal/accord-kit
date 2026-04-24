@@ -12,7 +12,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node -e \"import('./dist/start.js').then(m => m.startServerFromCli())\""
   },
   "dependencies": {
     "@accord-kit/core": "workspace:*",
