@@ -7,7 +7,7 @@ import {
   toDocumentId,
 } from '@accord-kit/core'
 import chokidar, { type FSWatcher } from 'chokidar'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type * as Y from 'yjs'
 import { DocPool } from './sync.js'
@@ -64,6 +64,7 @@ class TextFileWatcher implements AccordWatcher {
       void this.handleLocalChange(filePath)
     })
 
+    await this.scanLocalFiles()
     await this.pollManifest()
     this.manifestInterval = setInterval(() => {
       void this.pollManifest()
@@ -89,6 +90,38 @@ class TextFileWatcher implements AccordWatcher {
     this.knownDocuments.add(documentId)
     this.attachRemoteWriter(documentId)
     await this.docPool.applyContent(documentId, content)
+  }
+
+  private async scanLocalFiles(): Promise<void> {
+    const filePaths = await this.walkFiles(this.config.root)
+
+    await Promise.all(
+      filePaths.map(async (filePath) => {
+        await this.handleLocalChange(filePath)
+      }),
+    )
+  }
+
+  private async walkFiles(directory: string): Promise<string[]> {
+    const entries = await readdir(directory, { withFileTypes: true })
+    const filePaths: string[] = []
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = path.join(directory, entry.name)
+        const documentId = this.documentIdForPath(entryPath)
+
+        if (documentId && !this.shouldSync(documentId)) return
+
+        if (entry.isDirectory()) {
+          filePaths.push(...(await this.walkFiles(entryPath)))
+        } else if (entry.isFile()) {
+          filePaths.push(entryPath)
+        }
+      }),
+    )
+
+    return filePaths
   }
 
   private async pollManifest(): Promise<void> {
