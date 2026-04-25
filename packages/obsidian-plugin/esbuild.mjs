@@ -7,7 +7,7 @@ const isWatch = process.argv.includes('--watch')
 const options = {
   entryPoints: ['src/main.ts'],
   bundle: true,
-  external: ['obsidian', 'electron', 'node:*'],
+  external: ['obsidian', 'electron', 'node:*', '@codemirror/state', '@codemirror/view'],
   format: 'cjs',
   platform: 'node',
   target: 'es2022',
