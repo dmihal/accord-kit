@@ -10412,7 +10412,9 @@ var DocPool = class {
   async applyContent(documentId, content) {
     const handle = this.open(documentId);
     await handle.synced;
-    handle.ydoc.getMap("metadata").set("exists", true);
+    if (!handle.ydoc.getMap("metadata").get("exists")) {
+      handle.ydoc.getMap("metadata").set("exists", true);
+    }
     applyFileContent(handle.yText, content);
   }
   close(documentId) {
@@ -12140,6 +12142,7 @@ var TextFileWatcher = class {
   observedDocuments = /* @__PURE__ */ new Set();
   locallyDeletedDocuments = /* @__PURE__ */ new Set();
   recentWrites = /* @__PURE__ */ new Map();
+  pendingLocalChanges = /* @__PURE__ */ new Map();
   directoryScanTimers = /* @__PURE__ */ new Set();
   manifestUrl;
   metadata;
@@ -12160,10 +12163,10 @@ var TextFileWatcher = class {
       ignored: (candidatePath) => this.shouldIgnoreAbsolutePath(candidatePath)
     });
     this.watcher.on("add", (filePath) => {
-      void this.handleLocalChange(filePath);
+      this.scheduleLocalChange(filePath);
     });
     this.watcher.on("change", (filePath) => {
-      void this.handleLocalChange(filePath);
+      this.scheduleLocalChange(filePath);
     });
     this.watcher.on("unlink", (filePath) => {
       void this.handleLocalDelete(filePath);
@@ -12184,8 +12187,20 @@ var TextFileWatcher = class {
       clearInterval(this.manifestInterval);
     for (const timer of this.directoryScanTimers)
       clearTimeout(timer);
+    for (const timer of this.pendingLocalChanges.values())
+      clearTimeout(timer);
     await this.watcher?.close();
     this.docPool.destroy();
+  }
+  scheduleLocalChange(filePath) {
+    const existing = this.pendingLocalChanges.get(filePath);
+    if (existing)
+      clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.pendingLocalChanges.delete(filePath);
+      void this.handleLocalChange(filePath);
+    }, 80);
+    this.pendingLocalChanges.set(filePath, timer);
   }
   async handleLocalChange(filePath) {
     const documentId = this.documentIdForPath(filePath);
@@ -12394,6 +12409,7 @@ function httpGetJson(url) {
 var DEFAULT_SETTINGS = {
   serverUrl: "ws://localhost:1234",
   userName: "Obsidian",
+  ignoredFolders: [],
   deletionBehavior: "trash"
 };
 var AccordKitPlugin = class extends import_obsidian.Plugin {
@@ -12442,7 +12458,8 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
       root: vaultPath,
       serverUrl: this.settings.serverUrl,
       userName: this.settings.userName,
-      deletionBehavior: this.settings.deletionBehavior
+      deletionBehavior: this.settings.deletionBehavior,
+      ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, "")}/`)
     }).then((w) => {
       this.setStatus("syncing");
       return w;
@@ -12499,6 +12516,13 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Ignored folders").setDesc("Folder names to exclude from sync, one per line (e.g. Templates).").addTextArea((text) => {
+      text.setPlaceholder("Templates\nArchive").setValue(this.plugin.settings.ignoredFolders.join("\n")).onChange(async (value) => {
+        this.plugin.settings.ignoredFolders = value.split("\n").map((f) => f.trim()).filter((f) => f.length > 0);
+        await this.plugin.saveSettings();
+      });
+      text.inputEl.rows = 5;
+    });
   }
 };
 /*! Bundled license information:

@@ -129,7 +129,7 @@ The server should print a warning whenever it binds to a non-loopback address wh
 - Server URL (WebSocket endpoint)
 - Root folder to watch
 - User display name (for attribution)
-- File patterns to ignore (gitignore-style)
+- Ignore patterns (gitignore-style, for scripted/agent use)
 
 ---
 
@@ -142,7 +142,7 @@ The server should print a warning whenever it binds to a non-loopback address wh
 
 **Sync scope:**
 - Default: entire vault.
-- Configurable: restrict to one or more subfolders, or exclude folders/patterns (gitignore-style).
+- Configurable: exclude specific folders from sync by name.
 
 **Conflict handling:**
 YJS merges concurrent edits silently and deterministically — no user action is required. The merged result is applied directly to the editor, consistent with Google Docs behavior. A future version may add visible merge annotations when two users edit the same region simultaneously.
@@ -153,8 +153,7 @@ The Obsidian plugin uses Obsidian's native undo history in v1. Remote changes ma
 **Configuration (Obsidian plugin settings):**
 - Server URL
 - User display name
-- Sync scope: whole vault, specific folders, or exclusion patterns
-- Ignore patterns (extends the default list)
+- Ignored folders: a list of folder names to exclude from sync (e.g. `Templates`, `Archive`)
 
 ---
 

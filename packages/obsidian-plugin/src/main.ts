@@ -11,12 +11,14 @@ import { startAccordWatcher, type AccordWatcher } from '@accord-kit/cli'
 interface AccordKitSettings {
   serverUrl: string
   userName: string
+  ignoredFolders: string[]
   deletionBehavior: 'trash' | 'delete'
 }
 
 const DEFAULT_SETTINGS: AccordKitSettings = {
   serverUrl: 'ws://localhost:1234',
   userName: 'Obsidian',
+  ignoredFolders: [],
   deletionBehavior: 'trash',
 }
 
@@ -75,6 +77,7 @@ export default class AccordKitPlugin extends Plugin {
       serverUrl: this.settings.serverUrl,
       userName: this.settings.userName,
       deletionBehavior: this.settings.deletionBehavior,
+      ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, '')}/`),
     })
       .then((w) => {
         this.setStatus('syncing')
@@ -160,5 +163,22 @@ class AccordKitSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings()
           }),
       )
+
+    new Setting(containerEl)
+      .setName('Ignored folders')
+      .setDesc('Folder names to exclude from sync, one per line (e.g. Templates).')
+      .addTextArea((text) => {
+        text
+          .setPlaceholder('Templates\nArchive')
+          .setValue(this.plugin.settings.ignoredFolders.join('\n'))
+          .onChange(async (value) => {
+            this.plugin.settings.ignoredFolders = value
+              .split('\n')
+              .map((f) => f.trim())
+              .filter((f) => f.length > 0)
+            await this.plugin.saveSettings()
+          })
+        text.inputEl.rows = 5
+      })
   }
 }

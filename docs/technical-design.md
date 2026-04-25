@@ -385,12 +385,9 @@ Awareness updates are debounced to 50ms to avoid saturating the WebSocket with c
 
 ### Sync Scope
 
-The plugin settings allow:
-- **Whole vault** (default): all files synced.
-- **Include paths**: whitelist of folder prefixes (e.g. `projects/`, `shared/`).
-- **Exclude patterns**: gitignore-style patterns applied on top (e.g. `private/`, `*.excalidraw`).
+The plugin syncs the entire vault by default. Users can exclude specific folders by name via the "Ignored folders" setting. Each entry is a plain folder name (e.g. `Templates`, `Archive`); the watcher appends a trailing `/` and passes these to the `ignorePatterns` option in `WatcherConfig`.
 
-Evaluation order: include list → exclude patterns. A file must pass both to be synced.
+Advanced gitignore-style patterns and include-path whitelisting are deferred to a future release.
 
 ### Conflict Handling
 
@@ -401,13 +398,9 @@ YJS CRDTs merge concurrent edits deterministically — there are no conflicts in
 ```typescript
 interface AccordKitSettings {
   serverUrl: string           // ws://localhost:1234
-  binaryUrl: string           // http://localhost:1234 (for binary REST)
   userName: string
-  syncMode: 'vault' | 'include' | 'exclude'
-  includePaths: string[]
-  excludePatterns: string[]   // appended to the default ignore list
+  ignoredFolders: string[]    // plain folder names excluded from sync (e.g. ['Templates', 'Archive'])
   deletionBehavior: 'trash' | 'delete'  // default: 'trash'
-  ignorePatterns: string[]    // user-supplied additions to the default ignore list
 }
 ```
 
