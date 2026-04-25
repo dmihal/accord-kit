@@ -42,6 +42,7 @@ class TextFileWatcher implements AccordWatcher {
   private readonly observedDocuments = new Set<string>()
   private readonly locallyDeletedDocuments = new Set<string>()
   private readonly recentWrites = new Map<string, string>()
+  private readonly pendingLocalChanges = new Map<string, NodeJS.Timeout>()
   private readonly directoryScanTimers = new Set<NodeJS.Timeout>()
   private readonly manifestUrl: string
   private metadata?: { map: Y.Map<DeletionRecord>; synced: Promise<void> }
@@ -64,10 +65,10 @@ class TextFileWatcher implements AccordWatcher {
     })
 
     this.watcher.on('add', (filePath) => {
-      void this.handleLocalChange(filePath)
+      this.scheduleLocalChange(filePath)
     })
     this.watcher.on('change', (filePath) => {
-      void this.handleLocalChange(filePath)
+      this.scheduleLocalChange(filePath)
     })
     this.watcher.on('unlink', (filePath) => {
       void this.handleLocalDelete(filePath)
@@ -88,8 +89,19 @@ class TextFileWatcher implements AccordWatcher {
   async stop(): Promise<void> {
     if (this.manifestInterval) clearInterval(this.manifestInterval)
     for (const timer of this.directoryScanTimers) clearTimeout(timer)
+    for (const timer of this.pendingLocalChanges.values()) clearTimeout(timer)
     await this.watcher?.close()
     this.docPool.destroy()
+  }
+
+  private scheduleLocalChange(filePath: string): void {
+    const existing = this.pendingLocalChanges.get(filePath)
+    if (existing) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      this.pendingLocalChanges.delete(filePath)
+      void this.handleLocalChange(filePath)
+    }, 80)
+    this.pendingLocalChanges.set(filePath, timer)
   }
 
   private async handleLocalChange(filePath: string): Promise<void> {
