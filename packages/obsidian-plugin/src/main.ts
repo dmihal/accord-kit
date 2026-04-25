@@ -29,6 +29,7 @@ export default class AccordKitPlugin extends Plugin {
   settings!: AccordKitSettings
   private statusBarItem!: HTMLElement
   private watcherPromise: Promise<AccordWatcher | null> | null = null
+  private restartTimer: NodeJS.Timeout | null = null
   private readonly presence = new CursorPresenceManager()
 
   async onload(): Promise<void> {
@@ -63,9 +64,12 @@ export default class AccordKitPlugin extends Plugin {
     void this.restartWatcher()
   }
 
-  async restartWatcher(): Promise<void> {
-    await this.teardownWatcher()
-    void this.launchWatcher()
+  restartWatcher(): void {
+    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      void this.teardownWatcher().then(() => void this.launchWatcher())
+    }, 300)
   }
 
   private getVaultPath(): string | null {
@@ -113,6 +117,7 @@ export default class AccordKitPlugin extends Plugin {
     })
       .then((w) => {
         this.setStatus('syncing')
+        void this.updateCursorPresence()
         return w
       })
       .catch((err: unknown) => {
@@ -126,6 +131,11 @@ export default class AccordKitPlugin extends Plugin {
   }
 
   private async teardownWatcher(): Promise<void> {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    this.presence.setActive(null, null)
     const p = this.watcherPromise
     this.watcherPromise = null
     const watcher = await p

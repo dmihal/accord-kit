@@ -12574,6 +12574,7 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
   settings;
   statusBarItem;
   watcherPromise = null;
+  restartTimer = null;
   presence = new CursorPresenceManager();
   async onload() {
     await this.loadSettings();
@@ -12601,9 +12602,12 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
     void this.restartWatcher();
   }
-  async restartWatcher() {
-    await this.teardownWatcher();
-    void this.launchWatcher();
+  restartWatcher() {
+    if (this.restartTimer) clearTimeout(this.restartTimer);
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      void this.teardownWatcher().then(() => void this.launchWatcher());
+    }, 300);
   }
   getVaultPath() {
     const { adapter } = this.app.vault;
@@ -12643,6 +12647,7 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
       ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, "")}/`)
     }).then((w) => {
       this.setStatus("syncing");
+      void this.updateCursorPresence();
       return w;
     }).catch((err) => {
       this.setStatus("error");
@@ -12654,6 +12659,11 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
     });
   }
   async teardownWatcher() {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+    this.presence.setActive(null, null);
     const p = this.watcherPromise;
     this.watcherPromise = null;
     const watcher = await p;
