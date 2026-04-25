@@ -84,7 +84,9 @@ export class DocPool {
   async applyContent(documentId: string, content: string): Promise<void> {
     const handle = this.open(documentId)
     await handle.synced
-    handle.ydoc.getMap('metadata').set('exists', true)
+    if (!handle.ydoc.getMap('metadata').get('exists')) {
+      handle.ydoc.getMap('metadata').set('exists', true)
+    }
     applyFileContent(handle.yText, content)
   }
 
