@@ -20,7 +20,6 @@ The canonical use case: an AI agent writes files to a local directory on a serve
 - Cloud-hosted / managed offering.
 - Authentication or per-document access control.
 - A programmatic SDK for AI agents to push changes — agents interact via the file system only.
-- Real-time cursor presence (nice-to-have, tracked below).
 
 ---
 
@@ -194,9 +193,15 @@ Implementation uses the [YJS Awareness Protocol](https://docs.yjs.dev/api/about-
 
 ---
 
-## Real-Time Presence (Nice-to-Have)
+## Real-Time Presence
 
-For the Obsidian plugin, show other connected users' cursor positions as colored labels — similar to Google Docs. This is also implemented via the YJS Awareness Protocol and the CodeMirror YJS binding.
+For the Obsidian plugin, show other connected users' cursor positions as colored labels — similar to Google Docs. This is implemented via the YJS Awareness Protocol and the CodeMirror 6 YJS binding (`y-codemirror.next`).
+
+**Behavior:**
+- Each connected user's cursor is rendered as a colored caret with a name label inside the Obsidian editor.
+- Cursors appear and disappear in real time as users type and move their selection.
+- When a user disconnects, their cursor is automatically removed — Hocuspocus cleans up their awareness state and all connected clients receive the change event.
+- When a user switches to a different file, their cursor is cleared from the previous document before the new document is opened.
 
 The CLI watcher does not show presence (no UI), but it does broadcast its awareness state (user name, current file) to the server so other clients can display it.
 

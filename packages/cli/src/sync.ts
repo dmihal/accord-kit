@@ -2,6 +2,15 @@ import { applyFileContent } from '@accord-kit/core'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import * as Y from 'yjs'
 
+export function stringToColor(str: string): string {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  const hue = Math.abs(hash) % 360
+  return `hsl(${hue}, 70%, 50%)`
+}
+
 export interface DocPoolConfig {
   serverUrl: string
   userName: string
@@ -60,6 +69,7 @@ export class DocPool {
 
     provider.setAwarenessField('user', {
       name: this.config.userName,
+      color: stringToColor(this.config.userName),
       type: 'cli',
     })
 
@@ -88,6 +98,10 @@ export class DocPool {
       handle.ydoc.getMap('metadata').set('exists', true)
     }
     applyFileContent(handle.yText, content)
+  }
+
+  getProvider(documentId: string): HocuspocusProvider | undefined {
+    return this.docs.get(documentId)?.handle.provider
   }
 
   close(documentId: string): void {

@@ -11,6 +11,7 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import path from 'node:path'
+import type { HocuspocusProvider } from '@hocuspocus/provider'
 import type * as Y from 'yjs'
 import { DocPool } from './sync.js'
 
@@ -25,6 +26,7 @@ export interface WatcherConfig {
 
 export interface AccordWatcher {
   stop: () => Promise<void>
+  getProvider: (documentId: string) => HocuspocusProvider | undefined
 }
 
 export async function startAccordWatcher(config: WatcherConfig): Promise<AccordWatcher> {
@@ -84,6 +86,10 @@ class TextFileWatcher implements AccordWatcher {
     this.manifestInterval = setInterval(() => {
       void this.pollManifest()
     }, this.config.manifestPollMs ?? 500)
+  }
+
+  getProvider(documentId: string): HocuspocusProvider | undefined {
+    return this.docPool.getProvider(documentId)
   }
 
   async stop(): Promise<void> {

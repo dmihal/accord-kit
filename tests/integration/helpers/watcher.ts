@@ -10,6 +10,7 @@ export interface TestWatcher {
   read: (relPath: string) => Promise<string>
   remove: (relPath: string) => Promise<void>
   rename: (from: string, to: string) => Promise<void>
+  getProvider: AccordWatcher['getProvider']
 }
 
 export async function startTestWatcher(
@@ -32,6 +33,7 @@ export async function startTestWatcher(
       await watcher.stop()
       await rm(root, { recursive: true, force: true })
     },
+    getProvider: (documentId) => watcher.getProvider(documentId),
     write: async (relPath: string, content: string) => {
       const target = path.join(root, ...relPath.split('/'))
       await mkdir(path.dirname(target), { recursive: true })

@@ -1,12 +1,15 @@
 import {
   App,
   FileSystemAdapter,
+  MarkdownView,
   Notice,
   Plugin,
   PluginSettingTab,
   Setting,
 } from 'obsidian'
 import { startAccordWatcher, type AccordWatcher } from '@accord-kit/cli'
+import { normalizeDocumentId } from '@accord-kit/core'
+import { CursorPresenceManager } from './cursor-presence.js'
 
 interface AccordKitSettings {
   serverUrl: string
@@ -26,6 +29,7 @@ export default class AccordKitPlugin extends Plugin {
   settings!: AccordKitSettings
   private statusBarItem!: HTMLElement
   private watcherPromise: Promise<AccordWatcher | null> | null = null
+  private readonly presence = new CursorPresenceManager()
 
   async onload(): Promise<void> {
     await this.loadSettings()
@@ -36,10 +40,17 @@ export default class AccordKitPlugin extends Plugin {
       name: 'Restart sync',
       callback: () => void this.restartWatcher(),
     })
+
+    this.registerEditorExtension(this.presence.buildExtension())
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', () => void this.updateCursorPresence()),
+    )
+
     void this.launchWatcher()
   }
 
   async onunload(): Promise<void> {
+    this.presence.destroy()
     await this.teardownWatcher()
   }
 
@@ -61,6 +72,27 @@ export default class AccordKitPlugin extends Plugin {
     const { adapter } = this.app.vault
     if (adapter instanceof FileSystemAdapter) return adapter.getBasePath()
     return null
+  }
+
+  private async updateCursorPresence(): Promise<void> {
+    const mdView = this.app.workspace.getActiveViewOfType(MarkdownView)
+    const watcher = await this.watcherPromise
+
+    if (!mdView || !watcher) {
+      this.presence.setActive(null, null)
+      return
+    }
+
+    const filePath = mdView.file?.path
+    if (!filePath) {
+      this.presence.setActive(null, null)
+      return
+    }
+
+    const documentId = normalizeDocumentId(filePath)
+    const provider = watcher.getProvider(documentId) ?? null
+    const editorView = (mdView.editor as unknown as { cm?: object }).cm as import('@codemirror/view').EditorView | undefined
+    this.presence.setActive(editorView ?? null, provider)
   }
 
   private launchWatcher(): void {

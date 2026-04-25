@@ -333,19 +333,35 @@ The bootstrap progress is shown as a status bar message ("AccordKit: syncing 12/
 
 On subsequent plugin loads (Obsidian restart, plugin reload), the same reconciliation runs but most files will already match, so it completes quickly.
 
+### Provider Access from the Obsidian Plugin
+
+The Obsidian plugin needs direct access to the `HocuspocusProvider` for the currently open document in order to subscribe to awareness changes and send cursor positions. The `AccordWatcher` interface must expose this:
+
+```typescript
+export interface AccordWatcher {
+  stop: () => Promise<void>
+  getProvider: (documentId: string) => HocuspocusProvider | undefined
+}
+```
+
+`TextFileWatcher` satisfies this by delegating to `DocPool`, which already holds all open providers. The plugin resolves the document ID from the active file path using the same `toDocumentId` / `normalizeDocumentId` helpers from `@accord-kit/core`.
+
 ### Per-File Connection Lifecycle
 
 ```
 open file
-  → create Y.Doc
-  → connect HocuspocusProvider (WebSocket to server)
+  → resolve documentId from file path
+  → getProvider(documentId) — opens Y.Doc + WebSocket if not already open
   → bind y-codemirror.next to (editor.cm, yText, awareness)
+  → subscribe awareness.on('change', ...) to track remote cursors
 
 switch file
-  → tear down CodeMirror binding
+  → setAwarenessField('cursor', null) on outgoing provider
+  → tear down CodeMirror binding and awareness subscription
   → keep Y.Doc + provider alive in background (other clients may still be editing)
 
 close file / unload plugin
+  → setAwarenessField('cursor', null)
   → disconnect provider
   → destroy Y.Doc
 ```
@@ -382,6 +398,18 @@ const pushAwareness = debounce((view: EditorView) => {
 ```
 
 Awareness updates are debounced to 50ms to avoid saturating the WebSocket with cursor-drag events. `y-codemirror.next` renders other users' cursors as colored caret widgets with name labels automatically.
+
+**Cursor cleanup on file switch:** When the user switches to a different file, the plugin must clear the cursor field on the outgoing document's provider before opening the new one:
+
+```typescript
+provider.setAwarenessField('cursor', null)
+```
+
+Without this, the user's cursor ghost persists on the previous document until the provider is fully torn down.
+
+**Disconnect cleanup:** Hocuspocus automatically removes a client's awareness state when they disconnect. No client-side handling is required — all connected peers receive the awareness `change` event and the departed client's cursor is simply absent from `awareness.getStates()`.
+
+**Cursor position encoding:** Raw character indices (`view.state.selection.main.head`) are sufficient for a first implementation since Obsidian is single-user-per-file in practice. If concurrent editing is active, use `Y.createRelativePositionFromTypeIndex` / `Y.createAbsolutePositionFromRelativePosition` so cursor positions survive concurrent insertions and deletions without drifting.
 
 ### Sync Scope
 

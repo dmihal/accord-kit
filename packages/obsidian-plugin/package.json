@@ -10,9 +10,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@accord-kit/cli": "workspace:*"
+    "@accord-kit/cli": "workspace:*",
+    "@accord-kit/core": "workspace:*"
   },
   "devDependencies": {
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.6",
+    "@hocuspocus/provider": "^4.0.0",
     "esbuild": "^0.27.0",
     "obsidian": "latest"
   }
