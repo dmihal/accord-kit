@@ -21,6 +21,7 @@ describe('server config', () => {
         storageDir: './binary',
       },
       quiet: false,
+      verbose: false,
     })
   })
 
@@ -50,6 +51,7 @@ describe('server config', () => {
         storageDir: './files',
       },
       quiet: true,
+      verbose: false,
     })
   })
 

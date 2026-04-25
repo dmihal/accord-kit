@@ -1,18 +1,29 @@
 {
   "name": "@accord-kit/server",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "accord-server": "./bin/accord-server.mjs"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm build",
     "start": "node bin/accord-server.mjs",
     "start:verbose": "node bin/accord-server.mjs --verbose"
   },
