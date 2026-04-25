@@ -14,7 +14,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p plugin-dist && cp ../obsidian-plugin/main.js ../obsidian-plugin/manifest.json plugin-dist/",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
