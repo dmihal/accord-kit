@@ -34,20 +34,35 @@ export function createAuthCommand(): Command {
       const rl = readline.createInterface({ input, output })
       try {
         const code = opts.invite ?? (await rl.question('Invite code: ')).trim()
-        const name = opts.name ?? (await rl.question('Identity name (e.g. "David\'s laptop"): ')).trim()
 
-        const client = new ApiClient(serverUrl)
-        const result = await client.redeem(code, name)
+        if (code.startsWith('accord_sk_')) {
+          // Direct key (e.g. the admin key from `accord-server init`)
+          const client = new ApiClient(serverUrl, code)
+          const info = await client.whoami()
+          await saveCredentials({
+            serverUrl,
+            identityId: info.identityId,
+            name: info.name,
+            key: code,
+          })
+          console.log(`Logged in as ${info.name} (${info.identityId})`)
+          console.log(`Vaults: ${info.vaults.map(v => v.name).join(', ') || '(none)'}`)
+        } else {
+          const name = opts.name ?? (await rl.question('Identity name (e.g. "David\'s laptop"): ')).trim()
 
-        await saveCredentials({
-          serverUrl,
-          identityId: result.identityId,
-          name,
-          key: result.key,
-        })
+          const client = new ApiClient(serverUrl)
+          const result = await client.redeem(code, name)
 
-        console.log(`Logged in. Identity ID: ${result.identityId}`)
-        console.log(`Vault access granted: ${result.vaultId}`)
+          await saveCredentials({
+            serverUrl,
+            identityId: result.identityId,
+            name,
+            key: result.key,
+          })
+
+          console.log(`Logged in. Identity ID: ${result.identityId}`)
+          console.log(`Vault access granted: ${result.vaultId}`)
+        }
       } finally {
         rl.close()
       }
