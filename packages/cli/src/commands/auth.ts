@@ -19,6 +19,7 @@ export function createAuthCommand(): Command {
         const client = new ApiClient(serverUrl, existing.key)
         try {
           const info = await client.whoami()
+          await saveCredentials(existing)
           console.log(`Already logged in as ${info.name} (${info.identityId})`)
           console.log(`Vaults: ${info.vaults.map(v => v.name).join(', ') || '(none)'}`)
           return
