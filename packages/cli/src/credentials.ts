@@ -32,7 +32,12 @@ export async function loadCredentials(serverUrl?: string): Promise<Credentials |
 export async function saveCredentials(creds: Credentials): Promise<void> {
   const filePath = credentialsPath(creds.serverUrl)
   await mkdir(path.dirname(filePath), { recursive: true })
-  await writeFile(filePath, JSON.stringify(creds, null, 2) + '\n', { mode: 0o600 })
+  const content = JSON.stringify(creds, null, 2) + '\n'
+  await writeFile(filePath, content, { mode: 0o600 })
+  // Also update the default file so commands without --server work
+  const defaultPath = credentialsPath()
+  await mkdir(path.dirname(defaultPath), { recursive: true })
+  await writeFile(defaultPath, content, { mode: 0o600 })
 }
 
 export async function deleteCredentials(serverUrl?: string): Promise<void> {
