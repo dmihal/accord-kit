@@ -120,17 +120,17 @@ export default class AccordKitPlugin extends Plugin {
       token: this.settings.apiKey || undefined,
       vaultId: this.settings.vaultId || 'default',
       deletionBehavior: this.settings.deletionBehavior,
-      ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, '')}/`),
+      ignorePatterns: this.settings.ignoredFolders.map((folder) => `${folder.replace(/\/$/, '')}/`),
     })
-      .then((w) => {
+      .then((watcher) => {
         this.setStatus('syncing')
         void this.updateCursorPresence()
-        return w
+        return watcher
       })
-      .catch((err: unknown) => {
+      .catch((error: unknown) => {
         this.setStatus('error')
         new Notice(
-          `AccordKit: failed to connect — ${err instanceof Error ? err.message : String(err)}`,
+          `AccordKit: failed to connect — ${error instanceof Error ? error.message : String(error)}`,
         )
         this.watcherPromise = null
         return null
@@ -143,9 +143,9 @@ export default class AccordKitPlugin extends Plugin {
       this.restartTimer = null
     }
     this.presence.setActive(null, null)
-    const p = this.watcherPromise
+    const promise = this.watcherPromise
     this.watcherPromise = null
-    const watcher = await p
+    const watcher = await promise
     await watcher?.stop()
     this.setStatus('inactive')
   }
@@ -177,15 +177,15 @@ class RedeemModal extends Modal {
 
     new Setting(contentEl)
       .setName('Invite code')
-      .addText((t) => t.setPlaceholder('accord_inv_...').onChange((v) => { this.code = v.trim() }))
+      .addText((text) => text.setPlaceholder('accord_inv_...').onChange((value) => { this.code = value.trim() }))
 
     new Setting(contentEl)
       .setName('Identity name')
       .setDesc('A label for this device, e.g. "My MacBook".')
-      .addText((t) => t.setPlaceholder('My MacBook').onChange((v) => { this.name = v.trim() }))
+      .addText((text) => text.setPlaceholder('My MacBook').onChange((value) => { this.name = value.trim() }))
 
-    new Setting(contentEl).addButton((btn) =>
-      btn
+    new Setting(contentEl).addButton((button) =>
+      button
         .setButtonText('Redeem')
         .setCta()
         .onClick(() => {
@@ -229,7 +229,7 @@ class AccordKitSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('API key')
-      .setDesc('Your accord_sk_... key. Leave empty for open (unauthenticated) mode.')
+      .setDesc('Your accord_sk_... key. Leave empty for open mode.')
       .addText((text) => {
         text
           .setPlaceholder('accord_sk_...')
@@ -243,37 +243,51 @@ class AccordKitSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Import invite code')
-      .setDesc('Redeem an invite code to get a key from the server.')
-      .addButton((btn) =>
-        btn.setButtonText('Redeem invite…').onClick(() => {
+      .setDesc('Redeem a vault invite and save the returned key locally.')
+      .addButton((button) =>
+        button.setButtonText('Redeem invite…').onClick(() => {
           new RedeemModal(this.app, async (code, name) => {
             const serverUrl = this.plugin.settings.serverUrl
-            if (!serverUrl) { new Notice('Set the server URL first.'); return }
+            if (!serverUrl) {
+              new Notice('Set the server URL first.')
+              return
+            }
 
             const httpUrl = serverUrl.replace(/^ws:\/\//, 'http://').replace(/^wss:\/\//, 'https://')
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+            const existingKey = this.plugin.settings.apiKey.trim()
+            if (existingKey) {
+              headers.Authorization = `Bearer ${existingKey}`
+            }
+
             try {
-              const res = await fetch(`${httpUrl}/auth/redeem`, {
+              const response = await fetch(`${httpUrl}/auth/redeem`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ code, name }),
               })
-              const data = await res.json() as { key?: string; error?: string }
-              if (!res.ok || !data.key) throw new Error(data.error ?? `HTTP ${res.status}`)
+              const data = await response.json() as { key?: string; vaultId?: string; error?: string }
+              if (!response.ok || !data.key || !data.vaultId) {
+                throw new Error(data.error ?? `HTTP ${response.status}`)
+              }
 
+              if (!existingKey) {
+                this.plugin.settings.userName = name
+              }
               this.plugin.settings.apiKey = data.key
-              this.plugin.settings.userName = name
+              this.plugin.settings.vaultId = data.vaultId
               await this.plugin.saveSettings()
-              new Notice('Key saved. AccordKit is now authenticated.')
-            } catch (err) {
-              new Notice(`Redeem failed: ${err instanceof Error ? err.message : String(err)}`)
+              new Notice(`Vault access granted. Switched to ${data.vaultId}.`)
+            } catch (error) {
+              new Notice(`Redeem failed: ${error instanceof Error ? error.message : String(error)}`)
             }
           }).open()
         }),
       )
 
     new Setting(containerEl)
-      .setName('Vault')
-      .setDesc('The vault name to sync with (default: "default").')
+      .setName('Vault ID')
+      .setDesc('Vault identifier to sync with. Invite redemption sets this automatically.')
       .addText((text) =>
         text
           .setPlaceholder('default')
@@ -300,8 +314,8 @@ class AccordKitSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Deletion behavior')
       .setDesc('What happens to local files when a remote deletion is received.')
-      .addDropdown((drop) =>
-        drop
+      .addDropdown((dropdown) =>
+        dropdown
           .addOption('trash', 'Move to .accord-trash')
           .addOption('delete', 'Delete permanently')
           .setValue(this.plugin.settings.deletionBehavior)
@@ -321,8 +335,8 @@ class AccordKitSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.ignoredFolders = value
               .split('\n')
-              .map((f) => f.trim())
-              .filter((f) => f.length > 0)
+              .map((folder) => folder.trim())
+              .filter((folder) => folder.length > 0)
             await this.plugin.saveSettings()
           })
         text.inputEl.rows = 5

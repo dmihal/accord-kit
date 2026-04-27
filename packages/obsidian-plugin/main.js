@@ -16929,15 +16929,15 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
       token: this.settings.apiKey || void 0,
       vaultId: this.settings.vaultId || "default",
       deletionBehavior: this.settings.deletionBehavior,
-      ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, "")}/`)
-    }).then((w) => {
+      ignorePatterns: this.settings.ignoredFolders.map((folder) => `${folder.replace(/\/$/, "")}/`)
+    }).then((watcher) => {
       this.setStatus("syncing");
       void this.updateCursorPresence();
-      return w;
-    }).catch((err) => {
+      return watcher;
+    }).catch((error) => {
       this.setStatus("error");
       new import_obsidian.Notice(
-        `AccordKit: failed to connect \u2014 ${err instanceof Error ? err.message : String(err)}`
+        `AccordKit: failed to connect \u2014 ${error instanceof Error ? error.message : String(error)}`
       );
       this.watcherPromise = null;
       return null;
@@ -16949,9 +16949,9 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
       this.restartTimer = null;
     }
     this.presence.setActive(null, null);
-    const p = this.watcherPromise;
+    const promise = this.watcherPromise;
     this.watcherPromise = null;
-    const watcher = await p;
+    const watcher = await promise;
     await watcher?.stop();
     this.setStatus("inactive");
   }
@@ -16976,14 +16976,14 @@ var RedeemModal = class extends import_obsidian.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Redeem invite code" });
-    new import_obsidian.Setting(contentEl).setName("Invite code").addText((t) => t.setPlaceholder("accord_inv_...").onChange((v) => {
-      this.code = v.trim();
+    new import_obsidian.Setting(contentEl).setName("Invite code").addText((text) => text.setPlaceholder("accord_inv_...").onChange((value) => {
+      this.code = value.trim();
     }));
-    new import_obsidian.Setting(contentEl).setName("Identity name").setDesc('A label for this device, e.g. "My MacBook".').addText((t) => t.setPlaceholder("My MacBook").onChange((v) => {
-      this.name = v.trim();
+    new import_obsidian.Setting(contentEl).setName("Identity name").setDesc('A label for this device, e.g. "My MacBook".').addText((text) => text.setPlaceholder("My MacBook").onChange((value) => {
+      this.name = value.trim();
     }));
     new import_obsidian.Setting(contentEl).addButton(
-      (btn) => btn.setButtonText("Redeem").setCta().onClick(() => {
+      (button) => button.setButtonText("Redeem").setCta().onClick(() => {
         if (!this.code) {
           new import_obsidian.Notice("Invite code is required.");
           return;
@@ -17016,15 +17016,15 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("API key").setDesc("Your accord_sk_... key. Leave empty for open (unauthenticated) mode.").addText((text) => {
+    new import_obsidian.Setting(containerEl).setName("API key").setDesc("Your accord_sk_... key. Leave empty for open mode.").addText((text) => {
       text.setPlaceholder("accord_sk_...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
         await this.plugin.saveSettings();
       });
       text.inputEl.type = "password";
     });
-    new import_obsidian.Setting(containerEl).setName("Import invite code").setDesc("Redeem an invite code to get a key from the server.").addButton(
-      (btn) => btn.setButtonText("Redeem invite\u2026").onClick(() => {
+    new import_obsidian.Setting(containerEl).setName("Import invite code").setDesc("Redeem a vault invite and save the returned key locally.").addButton(
+      (button) => button.setButtonText("Redeem invite\u2026").onClick(() => {
         new RedeemModal(this.app, async (code, name) => {
           const serverUrl = this.plugin.settings.serverUrl;
           if (!serverUrl) {
@@ -17032,25 +17032,35 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
             return;
           }
           const httpUrl = serverUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
+          const headers = { "Content-Type": "application/json" };
+          const existingKey = this.plugin.settings.apiKey.trim();
+          if (existingKey) {
+            headers.Authorization = `Bearer ${existingKey}`;
+          }
           try {
-            const res = await fetch(`${httpUrl}/auth/redeem`, {
+            const response = await fetch(`${httpUrl}/auth/redeem`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers,
               body: JSON.stringify({ code, name })
             });
-            const data = await res.json();
-            if (!res.ok || !data.key) throw new Error(data.error ?? `HTTP ${res.status}`);
+            const data = await response.json();
+            if (!response.ok || !data.key || !data.vaultId) {
+              throw new Error(data.error ?? `HTTP ${response.status}`);
+            }
+            if (!existingKey) {
+              this.plugin.settings.userName = name;
+            }
             this.plugin.settings.apiKey = data.key;
-            this.plugin.settings.userName = name;
+            this.plugin.settings.vaultId = data.vaultId;
             await this.plugin.saveSettings();
-            new import_obsidian.Notice("Key saved. AccordKit is now authenticated.");
-          } catch (err) {
-            new import_obsidian.Notice(`Redeem failed: ${err instanceof Error ? err.message : String(err)}`);
+            new import_obsidian.Notice(`Vault access granted. Switched to ${data.vaultId}.`);
+          } catch (error) {
+            new import_obsidian.Notice(`Redeem failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         }).open();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Vault").setDesc('The vault name to sync with (default: "default").').addText(
+    new import_obsidian.Setting(containerEl).setName("Vault ID").setDesc("Vault identifier to sync with. Invite redemption sets this automatically.").addText(
       (text) => text.setPlaceholder("default").setValue(this.plugin.settings.vaultId).onChange(async (value) => {
         this.plugin.settings.vaultId = value.trim() || "default";
         await this.plugin.saveSettings();
@@ -17063,14 +17073,14 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("Deletion behavior").setDesc("What happens to local files when a remote deletion is received.").addDropdown(
-      (drop) => drop.addOption("trash", "Move to .accord-trash").addOption("delete", "Delete permanently").setValue(this.plugin.settings.deletionBehavior).onChange(async (value) => {
+      (dropdown) => dropdown.addOption("trash", "Move to .accord-trash").addOption("delete", "Delete permanently").setValue(this.plugin.settings.deletionBehavior).onChange(async (value) => {
         this.plugin.settings.deletionBehavior = value;
         await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Ignored folders").setDesc("Folder names to exclude from sync, one per line (e.g. Templates).").addTextArea((text) => {
       text.setPlaceholder("Templates\nArchive").setValue(this.plugin.settings.ignoredFolders.join("\n")).onChange(async (value) => {
-        this.plugin.settings.ignoredFolders = value.split("\n").map((f) => f.trim()).filter((f) => f.length > 0);
+        this.plugin.settings.ignoredFolders = value.split("\n").map((folder) => folder.trim()).filter((folder) => folder.length > 0);
         await this.plugin.saveSettings();
       });
       text.inputEl.rows = 5;

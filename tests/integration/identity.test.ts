@@ -115,11 +115,18 @@ describe('invite + redeem', () => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${bobKey}` },
       body: JSON.stringify({ code, name: 'ignored' }),
     })
-    // With the current impl the server ignores the auth header on /auth/redeem
-    // and always creates a new identity (existing-key path is a CLI concern).
-    // This test just verifies a second identity is NOT created when we handle
-    // the flow correctly — for now assert the redeem succeeds.
+
     expect(redeemRes.status).toBe(200)
+    const redeemBody = await redeemRes.json() as { key: string; identityId: string; vaultId: string; isNew: boolean }
+    expect(redeemBody.key).toBe(bobKey)
+    expect(redeemBody.identityId).toBe(bobId)
+    expect(redeemBody.vaultId).toBe(srv.defaultVaultId)
+    expect(redeemBody.isNew).toBe(false)
+
+    const whoami = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
+    const vaultIds = (whoami.data as { vaults: Array<{ id: string }> }).vaults.map((vault) => vault.id)
+    expect(vaultIds).toContain(bobVault.id)
+    expect(vaultIds).toContain(srv.defaultVaultId)
   })
 })
 

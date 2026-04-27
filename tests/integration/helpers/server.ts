@@ -7,24 +7,52 @@ import { createRequire } from 'node:module'
 export interface TestServer {
   wsUrl: string
   httpUrl: string
+  createVault: (vaultId: string) => Promise<void>
   stop: () => Promise<void>
 }
 
 export interface StartTestServerOptions {
   sqlitePath?: string
   authMode?: 'open' | 'key'
+  vaults?: string[]
+  auth?:
+    | { mode: 'open' }
+    | {
+      mode: 'jwt'
+      issuer?: string
+      audience?: string
+      publicKeyPath: string
+      algorithm?: 'ES256' | 'RS256'
+      kid?: string
+    }
 }
 
 export async function startTestServer(options: StartTestServerOptions = {}): Promise<TestServer> {
+  const auth = options.authMode === 'key'
+    ? { mode: 'key' as const }
+    : options.auth ?? { mode: 'open' as const }
   const server = createAccordServer({
     ...defaultServerConfig(),
     port: 0,
-    auth: {
-      mode: options.authMode ?? 'open',
-      jwt: {
-        publicKeys: [],
+    auth: auth.mode === 'jwt'
+      ? {
+        mode: 'jwt',
+        jwt: {
+          issuer: auth.issuer,
+          audience: auth.audience,
+          publicKeys: [{
+            kid: auth.kid ?? 'test',
+            algorithm: auth.algorithm ?? 'ES256',
+            publicKeyPath: auth.publicKeyPath,
+          }],
+        },
+      }
+      : {
+        mode: auth.mode === 'key' ? 'key' : 'open',
+        jwt: {
+          publicKeys: [],
+        },
       },
-    },
     storage: {
       driver: 'sqlite',
       sqlite: {
@@ -39,10 +67,14 @@ export async function startTestServer(options: StartTestServerOptions = {}): Pro
   })
 
   await server.listen()
+  for (const vaultId of options.vaults ?? ['default']) {
+    await server.accord.storage.createVault(vaultId)
+  }
 
   return {
     wsUrl: server.webSocketURL,
     httpUrl: server.httpURL,
+    createVault: (vaultId: string) => server.accord.storage.createVault(vaultId),
     stop: async () => {
       await server.destroy()
     },

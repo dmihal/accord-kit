@@ -19,7 +19,7 @@ program
   .description('Watch a local directory and sync with an AccordKit server')
   .option('-s, --server <url>', 'AccordKit server WebSocket URL')
   .option('-u, --user <name>', 'display name for this client')
-  .option('--vault <vault>', 'vault name or ID to sync with', 'default')
+  .option('--vault <vault>', 'vault ID to sync with', 'default')
   .option('--token <key>', 'API key (overrides credentials file)')
   .option('--delete', 'permanently delete files on remote deletion (default: move to .accord-trash)')
   .option('--ignore <patterns...>', 'additional ignore patterns')

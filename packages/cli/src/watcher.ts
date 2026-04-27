@@ -12,6 +12,7 @@ import chokidar, { type FSWatcher } from 'chokidar'
 import { createPatch } from 'diff'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
+import { get as httpsGet } from 'node:https'
 import path from 'node:path'
 import type { HocuspocusProvider } from '@hocuspocus/provider'
 import type * as Y from 'yjs'
@@ -23,6 +24,7 @@ export interface WatcherConfig {
   userName: string
   token?: string
   vaultId?: string
+  syncTimeoutMs?: number
   ignorePatterns?: string[]
   manifestPollMs?: number
   deletionBehavior?: 'trash' | 'delete'
@@ -65,13 +67,15 @@ class TextFileWatcher implements AccordWatcher {
 
   constructor(private readonly config: WatcherConfig) {
     this.ignoreMatcher = createIgnoreMatcher(config.ignorePatterns)
+    const vaultId = config.vaultId ?? 'default'
     this.docPool = new DocPool({
-      serverUrl: config.serverUrl,
-      userName: config.userName,
+      serverUrl: buildVaultWebSocketUrl(config.serverUrl, vaultId, config.userName),
       token: config.token,
-      vaultId: config.vaultId,
+      userName: config.userName,
+      syncTimeoutMs: config.syncTimeoutMs,
+      vaultId,
     })
-    this.manifestUrl = new URL('/documents', config.serverUrl.replace(/^ws/, 'http')).toString()
+    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, vaultId)
   }
 
   async start(): Promise<void> {
@@ -213,7 +217,7 @@ class TextFileWatcher implements AccordWatcher {
   }
 
   private async pollManifest(): Promise<void> {
-    const documentIds = await httpGetJson<string[]>(this.manifestUrl)
+    const documentIds = await httpGetJson<string[]>(this.manifestUrl, this.config.token)
     await Promise.all(
       documentIds.map(async (documentId) => {
         const safeDocumentId = assertSafeDocumentId(documentId)
@@ -473,9 +477,30 @@ function waitForWatcherReady(watcher: FSWatcher): Promise<void> {
   })
 }
 
-function httpGetJson<T>(url: string): Promise<T> {
+function buildVaultWebSocketUrl(baseUrl: string, vaultId: string, userName: string): string {
+  const url = new URL(baseUrl)
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}`
+  url.searchParams.set('user', userName)
+  return url.toString()
+}
+
+function buildVaultManifestUrl(baseUrl: string, vaultId: string): string {
+  const url = new URL(baseUrl.replace(/^ws/, 'http'))
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}/documents`
+  url.search = ''
+  return url.toString()
+}
+
+function httpGetJson<T>(url: string, token?: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    httpGet(url, (res) => {
+    const get = url.startsWith('https:') ? httpsGet : httpGet
+
+    get(
+      url,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      },
+      (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`Failed to fetch document manifest: ${res.statusCode}`))
         res.resume()
@@ -487,6 +512,7 @@ function httpGetJson<T>(url: string): Promise<T> {
       res.on('end', () => {
         try { resolve(JSON.parse(body) as T) } catch (e) { reject(e) }
       })
-    }).on('error', reject)
+      },
+    ).on('error', reject)
   })
 }
