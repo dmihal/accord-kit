@@ -240,7 +240,11 @@ class TextFileWatcher implements AccordWatcher {
       map: handle.ydoc.getMap<DeletionRecord>('deletions'),
       synced: handle.synced,
     }
-    await handle.synced
+    try {
+      await handle.synced
+    } catch {
+      throw new Error(`Could not connect to AccordKit server at ${this.config.serverUrl}. Is it running?`)
+    }
 
     this.metadata.map.observe((event) => {
       for (const key of event.keysChanged) {

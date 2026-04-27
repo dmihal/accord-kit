@@ -116,4 +116,9 @@ program.addCommand(createAuthCommand())
 program.addCommand(createVaultCommand())
 program.addCommand(createTokenCommand())
 
-await program.parseAsync()
+try {
+  await program.parseAsync()
+} catch (err) {
+  console.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(1)
+}
