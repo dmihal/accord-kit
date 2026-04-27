@@ -83,11 +83,16 @@ function applyEnvOverrides(config: AccordServerConfig, env: NodeJS.ProcessEnv): 
   const portValue = env.ACCORD_SERVER_PORT ?? env.ACCORD_PORT
   const persistencePath = env.ACCORD_SQLITE_PATH ?? env.ACCORD_DB_PATH ?? config.persistence.path
   const storageDir = env.ACCORD_BINARY_STORAGE_DIR ?? env.ACCORD_BINARY_DIR ?? config.binary.storageDir
+  const authMode = (env.ACCORD_AUTH_MODE as AuthMode | undefined) ?? config.auth.mode
 
   return {
     ...config,
     address,
     port: portValue ? parsePort(portValue) : config.port,
+    auth: {
+      ...config.auth,
+      mode: authMode,
+    },
     persistence: {
       ...config.persistence,
       path: persistencePath,

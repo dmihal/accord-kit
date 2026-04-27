@@ -3,6 +3,9 @@ import { loadServerConfig, shouldWarnForUnauthenticatedBind } from './config.js'
 import { createAccordServer } from './server.js'
 import { runInit } from './bin/init.js'
 
+// Load .env if present — silently skip if missing
+try { process.loadEnvFile() } catch {}
+
 export async function startServerFromCli(argv = process.argv): Promise<void> {
   const program = new Command()
     .name('accord-server')

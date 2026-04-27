@@ -22,6 +22,12 @@ export function createAccordServer(config: AccordServerConfig): Server {
     extensions.unshift(createVerboseLogger())
   }
 
+  extensions.push({
+    async onListen() {
+      console.log(`Auth mode: ${config.auth.mode}`)
+    },
+  })
+
   const server = new Server({
     address: config.address,
     port: config.port,

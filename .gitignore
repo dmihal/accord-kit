@@ -6,3 +6,5 @@ coverage/
 .accord-trash/
 data.db
 binary/
+
+.env
