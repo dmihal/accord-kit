@@ -2,10 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { createDocumentsRouteExtension } from '../routes.js'
 
 describe('documents route', () => {
-  it('lists known document IDs as JSON', async () => {
+  it('lists vault-scoped document IDs as JSON', async () => {
     const extension = createDocumentsRouteExtension({
-      documentIds: new Set(['notes/b.md', 'notes/a.md', '__accord_metadata']),
-      getPersistedDocumentIds: () => ['notes/c.md', 'notes/a.md', '__accord_internal'],
+      auth: {
+        authenticateHttp: vi.fn().mockResolvedValue({
+          vaultId: 'default',
+          userId: 'user-1',
+          userName: 'Alice',
+          claims: { sub: 'user-1', vaults: ['default'] },
+        }),
+        listAccessibleVaults: vi.fn(),
+      } as never,
+      storage: {
+        listDocuments: vi.fn().mockResolvedValue(['notes/b.md', 'notes/a.md', '__accord_metadata']),
+      } as never,
     })
     const response = {
       writeHead: vi.fn(),
@@ -14,13 +24,13 @@ describe('documents route', () => {
 
     await expect(
       extension.onRequest?.({
-        request: { method: 'GET', url: '/documents' } as never,
+        request: { method: 'GET', url: '/vaults/default/documents', headers: {} } as never,
         response: response as never,
         instance: {} as never,
       }),
     ).rejects.toBeUndefined()
 
     expect(response.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({ 'Content-Type': 'application/json' }))
-    expect(response.end).toHaveBeenCalledWith('["notes/a.md","notes/b.md","notes/c.md"]')
+    expect(response.end).toHaveBeenCalledWith('["notes/b.md","notes/a.md"]')
   })
 })

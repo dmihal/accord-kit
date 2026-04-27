@@ -7,7 +7,12 @@ type AnyDb = any
 
 export async function runInit(options: { name?: string; config?: string }): Promise<void> {
   const config = await loadServerConfig({ configPath: options.config })
-  const dbPath = config.persistence.path
+  if (config.storage.driver !== 'sqlite') {
+    console.error('Error: accord-server init currently requires storage.driver=sqlite')
+    process.exit(1)
+  }
+
+  const dbPath = config.storage.sqlite.path
 
   if (dbPath === ':memory:') {
     console.error('Error: cannot init with in-memory database')

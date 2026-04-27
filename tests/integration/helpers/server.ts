@@ -19,9 +19,21 @@ export async function startTestServer(options: StartTestServerOptions = {}): Pro
   const server = createAccordServer({
     ...defaultServerConfig(),
     port: 0,
-    auth: { mode: options.authMode ?? 'open' },
-    persistence: {
-      path: options.sqlitePath ?? ':memory:',
+    auth: {
+      mode: options.authMode ?? 'open',
+      jwt: {
+        publicKeys: [],
+      },
+    },
+    storage: {
+      driver: 'sqlite',
+      sqlite: {
+        path: options.sqlitePath ?? ':memory:',
+      },
+      postgres: {
+        url: '',
+        poolSize: 10,
+      },
     },
     quiet: true,
   })
@@ -72,8 +84,20 @@ export async function startAuthTestServer(): Promise<AuthTestServer> {
   const server = createAccordServer({
     ...defaultServerConfig(),
     port: 0,
-    auth: { mode: 'key' },
-    persistence: { path: dbPath },
+    auth: {
+      mode: 'key',
+      jwt: {
+        publicKeys: [],
+      },
+    },
+    storage: {
+      driver: 'sqlite',
+      sqlite: { path: dbPath },
+      postgres: {
+        url: '',
+        poolSize: 10,
+      },
+    },
     quiet: true,
   })
 

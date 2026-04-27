@@ -58,6 +58,13 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+function ensureVaultColumn(db: Db, columnName: string, columnType: string): void {
+  const columns = db.prepare('PRAGMA table_info(vaults)').all() as Array<{ name: string }>
+  if (columns.some((column) => column.name === columnName)) return
+
+  db.exec(`ALTER TABLE vaults ADD COLUMN ${columnName} ${columnType}`)
+}
+
 export function runMigrations(db: Db): void {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -74,7 +81,7 @@ export function runMigrations(db: Db): void {
 
     CREATE TABLE IF NOT EXISTS vaults (
       id          TEXT PRIMARY KEY,
-      name        TEXT NOT NULL UNIQUE,
+      name        TEXT UNIQUE,
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       created_by  TEXT REFERENCES identities(id)
     );
@@ -99,6 +106,10 @@ export function runMigrations(db: Db): void {
 
     CREATE INDEX IF NOT EXISTS invite_codes_vault ON invite_codes (vault_id);
   `)
+
+  ensureVaultColumn(db, 'name', 'TEXT')
+  ensureVaultColumn(db, 'created_by', 'TEXT')
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS vaults_name_unique ON vaults (name) WHERE name IS NOT NULL;')
 }
 
 export class KeyStore {

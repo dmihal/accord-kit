@@ -1,9 +1,8 @@
 import { Command } from 'commander'
-import { loadServerConfig, shouldWarnForUnauthenticatedBind } from './config.js'
+import { loadServerConfig, shouldWarnForOpenBind } from './config.js'
 import { createAccordServer } from './server.js'
 import { runInit } from './bin/init.js'
 
-// Load .env if present — silently skip if missing
 try { process.loadEnvFile() } catch {}
 
 export async function startServerFromCli(argv = process.argv): Promise<void> {
@@ -28,9 +27,9 @@ export async function startServerFromCli(argv = process.argv): Promise<void> {
       })
       if (opts.verbose) config.verbose = true
 
-      if (shouldWarnForUnauthenticatedBind(config.address)) {
+      if (shouldWarnForOpenBind(config)) {
         console.warn(
-          `AccordKit has no application-level authentication in v1. Binding to ${config.address}; restrict access with Tailscale ACLs or firewall rules.`,
+          `AccordKit is running with auth.mode=open on ${config.address}; restrict access to loopback or a private network.`,
         )
       }
 

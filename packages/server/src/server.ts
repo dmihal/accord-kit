@@ -1,99 +1,107 @@
-import { SQLite } from '@hocuspocus/extension-sqlite'
 import { Server, type Extension, type Hocuspocus } from '@hocuspocus/server'
+import { AccordAuth, type AccordConnectionContext } from './auth/index.js'
+import { KeyStore, runMigrations } from './auth/key-store.js'
 import type { AccordServerConfig } from './config.js'
-import { runMigrations, KeyStore } from './auth/key-store.js'
-import { createKeyVerifier } from './auth/key.js'
 import { createDocumentsRouteExtension, createIdentityRouteExtension } from './routes.js'
+import { createAccordStorageExtension, createStorageDriver, type StorageDriver, SQLiteDriver } from './storage/index.js'
 
-export function createAccordServer(config: AccordServerConfig): Server {
-  const sqlite = new SQLite({
-    database: config.persistence.path,
-  })
+export interface AccordServer extends Server<AccordConnectionContext> {
+  accord: {
+    auth: AccordAuth
+    storage: StorageDriver
+    keyStore?: KeyStore
+  }
+}
 
-  const extensions: Extension[] = [
+export function createAccordServer(config: AccordServerConfig): AccordServer {
+  const storage = createStorageDriver(config.storage)
+  const keyStore = config.auth.mode === 'key' ? createKeyStore(storage) : undefined
+  const auth = new AccordAuth(config.auth, storage, keyStore)
+  const ready = setupStorage(storage, keyStore)
+
+  const extensions: Extension<AccordConnectionContext>[] = [
+    {
+      extensionName: 'AccordKitBootstrap',
+      async onListen() {
+        await ready
+      },
+      async onAuthenticate({ request, context, token }) {
+        await ready
+        await auth.authenticateWebSocket({ request, context, token })
+      },
+      async onDestroy() {
+        await storage.destroy()
+      },
+    },
     createDocumentsRouteExtension({
-      documentIds: new Set(),
-      getPersistedDocumentIds: () => listPersistedDocumentIds(sqlite),
+      auth,
+      storage,
     }),
-    sqlite,
+    createAccordStorageExtension(storage),
   ]
+
+  if (keyStore) {
+    extensions.push(createIdentityRouteExtension(keyStore))
+  }
 
   if (config.verbose) {
     extensions.unshift(createVerboseLogger())
   }
 
   extensions.push({
+    extensionName: 'AccordKitAuthModeLogger',
     async onListen() {
       console.log(`Auth mode: ${config.auth.mode}`)
     },
   })
 
-  const server = new Server({
+  const server = new Server<AccordConnectionContext>({
     address: config.address,
     port: config.port,
     quiet: config.quiet,
     debounce: 100,
     maxDebounce: 500,
     extensions,
-  })
+  }) as AccordServer
 
-  // patchListenHost must be called first so the key-mode wrapper below can
-  // wrap the already-patched listen.
-  patchListenHost(server)
-
-  if (config.auth.mode === 'key') {
-    const patchedListen = server.listen.bind(server)
-    server.listen = async (port?: number, callback?: unknown): Promise<Hocuspocus> => {
-      const result = await patchedListen(port, callback)
-
-      const db = (sqlite as { db?: unknown }).db
-      if (!db) throw new Error('SQLite database not initialized')
-
-      const store = new KeyStore(db)
-      runMigrations(db)
-
-      server.hocuspocus.configuration.extensions.push(createIdentityRouteExtension(store))
-
-      const verifier = createKeyVerifier(store)
-      server.hocuspocus.configuration.extensions.push({
-        async onAuthenticate({ token, requestParameters }) {
-          const vaultId = requestParameters.get('vault') ?? 'default'
-          return verifier.authenticate(token, vaultId)
-        },
-      })
-
-      return result
-    }
+  server.accord = {
+    auth,
+    storage,
+    keyStore,
   }
 
+  patchListenHost(server)
   return server
 }
 
-function listPersistedDocumentIds(sqlite: SQLite): string[] {
-  const rows = (sqlite.db?.prepare('SELECT name FROM documents ORDER BY name').all() ?? []) as unknown[]
+async function setupStorage(storage: StorageDriver, keyStore?: KeyStore): Promise<void> {
+  if (keyStore) {
+    const sqliteStorage = storage as SQLiteDriver
+    runMigrations(sqliteStorage.getDb())
+  }
 
-  return rows
-    .map((row): string | null => {
-      if (typeof row === 'object' && row !== null && 'name' in row && typeof row.name === 'string') {
-        return row.name
-      }
-
-      return null
-    })
-    .filter((documentId: string | null): documentId is string => documentId !== null)
+  await storage.setup()
 }
 
-function createVerboseLogger(): Extension {
+function createKeyStore(storage: StorageDriver): KeyStore {
+  if (!(storage instanceof SQLiteDriver)) {
+    throw new Error('auth.mode=key requires storage.driver=sqlite')
+  }
+
+  return new KeyStore(storage.getDb())
+}
+
+function createVerboseLogger(): Extension<AccordConnectionContext> {
   const tag = () => `[${new Date().toISOString()}]`
   return {
     onConnect: async ({ documentName, context }) => {
-      console.log(tag(), 'connect  ', documentName, context?.user?.name ?? '')
+      console.log(tag(), 'connect  ', documentName, context?.userName ?? '')
     },
     onDisconnect: async ({ documentName, context }) => {
-      console.log(tag(), 'disconnect', documentName, context?.user?.name ?? '')
+      console.log(tag(), 'disconnect', documentName, context?.userName ?? '')
     },
-    onLoadDocument: async ({ documentName }) => {
-      console.log(tag(), 'load     ', documentName)
+    onLoadDocument: async ({ documentName, context }) => {
+      console.log(tag(), 'load     ', documentName, context?.vaultId ?? '')
     },
     onStoreDocument: async ({ documentName }) => {
       console.log(tag(), 'store    ', documentName)
@@ -104,8 +112,8 @@ function createVerboseLogger(): Extension {
   }
 }
 
-function patchListenHost(server: Server): void {
-  server.listen = async (port?: number, callback: unknown = null): Promise<Hocuspocus> => {
+function patchListenHost(server: Server<AccordConnectionContext>): void {
+  server.listen = async (port?: number, callback: unknown = null): Promise<Hocuspocus<AccordConnectionContext>> => {
     if (port !== undefined) {
       server.configuration.port = port
     }
