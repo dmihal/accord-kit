@@ -19,6 +19,8 @@ export interface WatcherConfig {
   root: string
   serverUrl: string
   userName: string
+  token?: string
+  vaultId?: string
   ignorePatterns?: string[]
   manifestPollMs?: number
   deletionBehavior?: 'trash' | 'delete'
@@ -56,6 +58,8 @@ class TextFileWatcher implements AccordWatcher {
     this.docPool = new DocPool({
       serverUrl: config.serverUrl,
       userName: config.userName,
+      token: config.token,
+      vaultId: config.vaultId,
     })
     this.manifestUrl = new URL('/documents', config.serverUrl.replace(/^ws/, 'http')).toString()
   }

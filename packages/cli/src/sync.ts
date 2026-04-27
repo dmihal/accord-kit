@@ -14,6 +14,8 @@ export function stringToColor(str: string): string {
 export interface DocPoolConfig {
   serverUrl: string
   userName: string
+  token?: string
+  vaultId?: string
   syncTimeoutMs?: number
 }
 
@@ -56,10 +58,15 @@ export class DocPool {
       rejectSynced(new Error(`Timed out syncing "${documentId}"`))
     }, this.syncTimeoutMs)
 
+    const wsUrl = this.config.vaultId
+      ? `${this.config.serverUrl}?vault=${encodeURIComponent(this.config.vaultId)}`
+      : this.config.serverUrl
+
     const provider = new HocuspocusProvider({
-      url: this.config.serverUrl,
+      url: wsUrl,
       name: documentId,
       document: ydoc,
+      token: this.config.token,
       onSynced: ({ state }) => {
         if (!state) return
         clearTimeout(syncTimer)

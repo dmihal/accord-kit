@@ -4,6 +4,10 @@ import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startAccordWatcher } from './watcher.js'
+import { loadCredentials } from './credentials.js'
+import { createAuthCommand } from './commands/auth.js'
+import { createVaultCommand } from './commands/vault.js'
+import { createTokenCommand } from './commands/token.js'
 
 const program = new Command()
   .name('accord')
@@ -12,18 +16,46 @@ const program = new Command()
 program
   .command('watch <dir>')
   .description('Watch a local directory and sync with an AccordKit server')
-  .requiredOption('-s, --server <url>', 'AccordKit server WebSocket URL', 'ws://localhost:1234')
-  .option('-u, --user <name>', 'display name for this client', 'CLI')
+  .option('-s, --server <url>', 'AccordKit server WebSocket URL')
+  .option('-u, --user <name>', 'display name for this client')
+  .option('--vault <vault>', 'vault name or ID to sync with', 'default')
+  .option('--token <key>', 'API key (overrides credentials file)')
   .option('--delete', 'permanently delete files on remote deletion (default: move to .accord-trash)')
   .option('--ignore <patterns...>', 'additional ignore patterns')
-  .action(async (dir: string, opts: { server: string; user: string; delete?: boolean; ignore?: string[] }) => {
+  .action(async (dir: string, opts: {
+    server?: string
+    user?: string
+    vault: string
+    token?: string
+    delete?: boolean
+    ignore?: string[]
+  }) => {
+    // Resolve credentials: --token flag takes priority, then credentials file.
+    let serverUrl = opts.server
+    let userName = opts.user
+    let key = opts.token
+
+    if (!key) {
+      const creds = await loadCredentials(serverUrl)
+      if (creds) {
+        serverUrl ??= creds.serverUrl
+        userName ??= creds.name
+        key = creds.key
+      }
+    }
+
+    serverUrl ??= 'ws://localhost:1234'
+    userName ??= 'CLI'
+
     const root = path.resolve(dir)
-    console.log(`Syncing ${root} ↔ ${opts.server}`)
+    console.log(`Syncing ${root} ↔ ${serverUrl} (vault: ${opts.vault})`)
 
     const watcher = await startAccordWatcher({
       root,
-      serverUrl: opts.server,
-      userName: opts.user,
+      serverUrl,
+      userName,
+      vaultId: opts.vault,
+      token: key,
       deletionBehavior: opts.delete ? 'delete' : 'trash',
       ignorePatterns: opts.ignore,
     })
@@ -79,5 +111,9 @@ program
     console.log(`Plugin installed at ${pluginDir}`)
     console.log('Restart Obsidian (or reload plugins) to activate AccordKit.')
   })
+
+program.addCommand(createAuthCommand())
+program.addCommand(createVaultCommand())
+program.addCommand(createTokenCommand())
 
 await program.parseAsync()

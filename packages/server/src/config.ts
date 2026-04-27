@@ -6,9 +6,14 @@ export const DEFAULT_SERVER_PORT = 1234
 export const DEFAULT_SQLITE_PATH = './data.db'
 export const DEFAULT_BINARY_STORAGE_DIR = './binary'
 
+export type AuthMode = 'open' | 'key'
+
 export interface AccordServerConfig {
   address: string
   port: number
+  auth: {
+    mode: AuthMode
+  }
   persistence: {
     path: string
   }
@@ -35,6 +40,9 @@ export function defaultServerConfig(): AccordServerConfig {
   return {
     address: DEFAULT_SERVER_ADDRESS,
     port: DEFAULT_SERVER_PORT,
+    auth: {
+      mode: 'open',
+    },
     persistence: {
       path: DEFAULT_SQLITE_PATH,
     },
@@ -95,6 +103,10 @@ function mergeConfig(base: AccordServerConfig, override: Partial<AccordServerCon
   return {
     ...base,
     ...override,
+    auth: {
+      ...base.auth,
+      ...override.auth,
+    },
     persistence: {
       ...base.persistence,
       ...override.persistence,
