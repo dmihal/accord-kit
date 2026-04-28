@@ -1,5 +1,6 @@
 import { applyFileContent } from '@accord-kit/core'
 import { HocuspocusProvider } from '@hocuspocus/provider'
+import NodeWebSocket from 'ws'
 import * as Y from 'yjs'
 
 export function stringToColor(str: string): string {
@@ -32,6 +33,7 @@ interface StoredDocument {
   resolveSynced: () => void
   rejectSynced: (error: Error) => void
   syncTimer: NodeJS.Timeout
+  settled: boolean
 }
 
 export class DocPool {
@@ -54,8 +56,22 @@ export class DocPool {
       resolveSynced = resolve
       rejectSynced = reject
     })
+    const settleError = (error: Error) => {
+      const stored = this.docs.get(documentId)
+      if (!stored || stored.settled) return
+      stored.settled = true
+      clearTimeout(stored.syncTimer)
+      rejectSynced(error)
+    }
+    const settleSynced = () => {
+      const stored = this.docs.get(documentId)
+      if (!stored || stored.settled) return
+      stored.settled = true
+      clearTimeout(stored.syncTimer)
+      resolveSynced()
+    }
     const syncTimer = setTimeout(() => {
-      rejectSynced(new Error(`Timed out syncing "${documentId}"`))
+      settleError(new Error(`Timed out syncing "${documentId}"`))
     }, this.syncTimeoutMs)
 
     const wsUrl = this.config.vaultId
@@ -67,12 +83,20 @@ export class DocPool {
       name: documentId,
       document: ydoc,
       token: this.config.token,
-      onSynced: ({ state }) => {
+      WebSocketPolyfill: NodeWebSocket as unknown as typeof WebSocket,
+      onSynced: ({ state }: { state: boolean }) => {
         if (!state) return
-        clearTimeout(syncTimer)
-        resolveSynced()
+        settleSynced()
       },
-    })
+      onAuthenticationFailed: ({ reason }: { reason: string }) => {
+        settleError(new Error(`Authentication failed syncing "${documentId}": ${reason}`))
+      },
+      onClose: ({ event }: { event?: { code: number; reason: string } }) => {
+        if (!event || event.code === 1000 || event.code === 1005) return
+        const suffix = event.reason ? `: ${event.reason}` : ''
+        settleError(new Error(`Connection closed before sync for "${documentId}" (${event.code}${suffix})`))
+      },
+    } as any)
 
     provider.setAwarenessField('user', {
       name: this.config.userName,
@@ -93,6 +117,7 @@ export class DocPool {
       resolveSynced,
       rejectSynced,
       syncTimer,
+      settled: false,
     })
 
     return handle
