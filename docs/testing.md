@@ -265,6 +265,9 @@ pnpm test:unit
 # Integration tests only
 pnpm test:integration
 
+# Manual Codex-backed translation integration test
+pnpm test:integration:codex
+
 # Watch mode during development
 pnpm test:watch
 
@@ -273,6 +276,8 @@ pnpm vitest run tests/integration/text-sync.test.ts
 ```
 
 Integration tests are slower (real I/O, real sockets) and are tagged so CI can run unit tests on every push and integration tests on every PR.
+
+The Codex-backed translation test is intentionally opt-in. It runs a real `codex exec` process from the watcher's `--on-change` hook, so it depends on a locally installed/authenticated Codex CLI and external network access. It is not part of the default `pnpm test:integration` CI path.
 
 ---
 

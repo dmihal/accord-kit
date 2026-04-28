@@ -26,6 +26,30 @@ export async function waitForContent(
   throw lastError instanceof Error ? lastError : new Error(`Timed out waiting for ${relPath}`)
 }
 
+export async function waitForContentMatch(
+  root: string,
+  relPath: string,
+  predicate: (content: string) => boolean,
+  timeoutMs = 5_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  let lastError: unknown
+
+  while (Date.now() < deadline) {
+    try {
+      const content = await readFile(path.join(root, ...relPath.split('/')), 'utf8')
+      if (predicate(content)) return content
+      lastError = new Error(`Content for "${relPath}" did not match predicate. Received "${content}"`)
+    } catch (error) {
+      lastError = error
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Timed out waiting for ${relPath}`)
+}
+
 export async function waitForAbsence(root: string, relPath: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
 

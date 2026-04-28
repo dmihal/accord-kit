@@ -27,6 +27,8 @@ export async function startTestWatcher(
     manifestPollMs: options.manifestPollMs ?? 100,
     ignorePatterns: options.ignorePatterns,
     deletionBehavior: options.deletionBehavior,
+    onChangeCommand: options.onChangeCommand,
+    onChangePrefix: options.onChangePrefix,
   })
 
   return {
