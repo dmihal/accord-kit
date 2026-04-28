@@ -12,20 +12,20 @@ An AI agent writes files to a local directory; a human edits the same documents 
 └─────────────────┘                         │   AccordKit Server   │
                                             │   (Hocuspocus)       │
 ┌─────────────────┐        WebSocket        │                      │
-│   CLI Watcher   │◄──────────────────────►│  Persistence:        │
-│  (AI agent FS)  │                         │  SQLite              │
+│   CLI Watcher   │◄──────────────────────►│  Storage:            │
+│  (AI agent FS)  │                         │  SQLite / Postgres   │
 └─────────────────┘                         └──────────────────────┘
 ```
 
-All clients connect to the server over WebSocket. Text files are synced via Yjs CRDTs with character-level merging. Concurrent edits from multiple clients merge deterministically — no conflicts, no manual resolution.
+All clients connect to the server over WebSocket. Text files are synced via Yjs CRDTs with character-level merging. Concurrent edits from multiple clients merge deterministically.
 
 ## Packages
 
 | Package | Description |
 |---|---|
-| [`@accord-kit/server`](packages/server) | Sync server with SQLite persistence |
+| [`@accord-kit/server`](packages/server) | Sync server with multi-vault storage and auth modes |
 | [`@accord-kit/cli`](packages/cli) | CLI watcher plus auth, vault, invite, and plugin-install commands |
-| [`@accord-kit/core`](packages/core) | Shared utilities (path normalization, ignore patterns, text diffing) |
+| [`@accord-kit/core`](packages/core) | Shared utilities (path normalization, ignore patterns, text diffing, vault helpers) |
 
 ## Quick Start
 
@@ -47,10 +47,10 @@ accord install-plugin /path/to/your/vault
 
 Restart Obsidian and enable AccordKit in Settings → Community plugins. Point it at `ws://localhost:1234`.
 
-### 3. Watch a directory (for AI agents / scripts)
+### 3. Watch a directory
 
 ```bash
-accord watch ./my-notes --server ws://localhost:1234 --user my-agent
+accord watch ./my-notes --server ws://localhost:1234 --user my-agent --vault default
 ```
 
 Files written to `./my-notes` sync to the server and appear in Obsidian instantly. Files edited in Obsidian appear on disk just as fast.
@@ -78,10 +78,15 @@ address: 127.0.0.1
 port: 1234
 auth:
   mode: key
-persistence:
-  path: ./data.db
-binary:
-  storageDir: ./binary
+  jwt:
+    publicKeys: []
+storage:
+  driver: sqlite
+  sqlite:
+    path: ./data.db
+  postgres:
+    url: ''
+    poolSize: 10
 ```
 
 Then start the server:
@@ -92,40 +97,32 @@ accord-server start --config accord-server.yaml
 
 ### 3. Bootstrap the first admin client
 
-`accord-server init` prints the first admin identity ID and key. Write those values into the CLI credentials file for the server host and port:
+Use the printed admin key directly:
 
 ```bash
-mkdir -p ~/.config/accord/credentials
+accord auth login ws://localhost:1234 --invite accord_sk_...
 ```
 
-Create `~/.config/accord/credentials/localhost-1234.json`:
+That writes the local credentials file automatically. If you prefer, you can still create the credentials file manually with the printed `identityId`, `name`, and `key`.
 
-```json
-{
-  "serverUrl": "ws://localhost:1234",
-  "identityId": "01H...",
-  "name": "David's laptop",
-  "key": "accord_sk_..."
-}
-```
-
-### 4. Issue an invite and redeem it on another client
+### 4. Issue a vault invite and redeem it on another client
 
 From the bootstrap admin machine:
 
 ```bash
 accord vault invite default
+accord vault invite team-notes
 ```
 
 On the new client:
 
 ```bash
-accord auth login ws://localhost:1234
+accord auth login ws://localhost:1234 --invite accord_inv_...
 ```
 
-`accord auth login` prompts for the invite code if you do not pass `--invite`.
+`accord auth login` also prompts for the code if you omit `--invite`.
 
-If you already have credentials on that client and only want to add another vault, use:
+If a client already has credentials and you only want to add another vault to the same identity, use:
 
 ```bash
 accord token redeem accord_inv_...
@@ -134,14 +131,31 @@ accord token redeem accord_inv_...
 ### 5. Watch a specific vault
 
 ```bash
-accord watch ./my-notes --server ws://localhost:1234 --vault default
+accord watch ./my-notes --server ws://localhost:1234 --vault <vault-id>
 ```
+
+The watcher is vault-scoped. CLI management commands such as `accord vault invite <vault>` accept either a vault name or ID, but `accord watch` should be pointed at the vault ID you want to sync.
 
 The CLI also supports `--token <key>` for one-off agent processes that should not read from a local credentials file.
 
-## CLI Overview
+The Obsidian plugin supports the same model:
 
-The CLI now includes these command groups:
+- paste an `accord_sk_...` key directly, or
+- redeem an `accord_inv_...` invite in the settings UI
+
+Redeeming an invite in the plugin updates the saved `vaultId` to the invited vault automatically.
+
+## Auth Modes
+
+AccordKit currently supports:
+
+- `auth.mode: open` for local loopback development
+- `auth.mode: key` for invite-based access control and vault-scoped authorization
+- `auth.mode: jwt` for operator-managed bearer-token auth
+
+Today’s multi-vault onboarding flow is implemented in `key` mode. JWT mode exists for token-based access, but it does not expose the invite/identity management API.
+
+## CLI Overview
 
 - `accord watch <dir>` for syncing a local directory
 - `accord auth login|status|logout` for local credentials
@@ -169,11 +183,6 @@ Extend via `--ignore` (CLI) or the ignore patterns field (Obsidian settings).
 By default, deleted files are moved to a local `.accord-trash/` directory rather than permanently removed. Each client trashes its own copy; trash contents are never synced. Pass `--delete` to the CLI watcher or set deletion behavior to "Delete permanently" in the Obsidian plugin for hard deletes.
 
 ## Networking & Security
-
-AccordKit supports two server modes:
-
-- `auth.mode: open` for local loopback development
-- `auth.mode: key` for invite-based access control and vault-scoped authorization
 
 For remote access, the recommended setup is [Tailscale](https://tailscale.com):
 

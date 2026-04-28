@@ -20,7 +20,7 @@ accord watch <dir> [options]
 Options:
   -s, --server <url>        AccordKit server WebSocket URL
   -u, --user <name>         Display name shown to other clients
-  --vault <vault>           Vault name or ID to sync with  (default: default)
+  --vault <vault>           Vault ID to sync with  (default: default)
   --token <key>             API key (overrides credentials file)
   --delete                  Permanently delete files when the remote removes them
                             (default: move to .accord-trash/ instead)
@@ -30,10 +30,10 @@ Options:
 **Example — AI agent writing to a notes directory:**
 
 ```bash
-accord watch ./my-notes --server ws://localhost:1234 --user my-agent
+accord watch ./my-notes --server ws://localhost:1234 --user my-agent --vault default
 ```
 
-Files created or modified under `./my-notes` sync to the server immediately. Changes from other clients (e.g. Obsidian) appear on disk just as fast.
+Files created or modified under `./my-notes` sync to the server immediately. Changes from other clients appear on disk just as fast.
 
 In key-auth mode, log in first with `accord auth login <serverUrl>` or pass `--token` explicitly. If `--server`, `--user`, or `--token` are omitted, the CLI falls back to the local credentials file when available.
 
@@ -43,12 +43,15 @@ Manage local credentials for a server.
 
 #### `accord auth login <serverUrl>`
 
-Redeem an invite code and save the returned key for future commands.
+Redeem an invite code or save a direct admin key for future commands.
 
 ```bash
 accord auth login ws://localhost:1234
 accord auth login ws://localhost:1234 --name "David's laptop" --invite accord_inv_...
+accord auth login ws://localhost:1234 --invite accord_sk_...
 ```
+
+If you pass an `accord_sk_...` key, the CLI treats it as a direct login key and saves it after verifying `whoami`.
 
 If valid credentials already exist for that server, the CLI prints the current identity and exits.
 
@@ -94,7 +97,7 @@ accord vault list
 
 #### `accord vault invite <vault>`
 
-Generate a single-use invite code for a vault.
+Generate a single-use invite code for a vault. This command accepts either the vault name or vault ID.
 
 ```bash
 accord vault invite default
@@ -154,21 +157,24 @@ Copy the bundled Obsidian plugin into an existing vault and enable it.
 accord install-plugin /path/to/your/vault
 ```
 
-This copies `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/accord-kit/` and adds `accord-kit` to `community-plugins.json`. Restart Obsidian (or reload plugins in Settings) to activate it.
-
-The vault must already exist and contain an `.obsidian/` directory (i.e. Obsidian must have opened it at least once).
+This copies `main.js` and `manifest.json` into `<vault>/.obsidian/plugins/accord-kit/` and adds `accord-kit` to `community-plugins.json`.
 
 ## Credentials
 
 When you log in, the CLI stores credentials under `~/.config/accord/credentials/<host>-<port>.json`. Commands that talk to the identity API read from that file by default. Pass `--token` to override the stored key for a single command.
 
-For the first bootstrap admin created by `accord-server init`, create this file manually using the server URL you will connect to plus the printed `identityId`, `name`, and `key`. Subsequent devices should use invite redemption instead of manual file creation.
+For the first bootstrap admin created by `accord-server init`, you can either:
 
-## Deletion behavior
+- log in directly with `accord auth login <serverUrl> --invite accord_sk_...`, or
+- create the credentials file manually with the printed `identityId`, `name`, and `key`
+
+Subsequent devices should use invite redemption instead of manual file creation.
+
+## Deletion Behavior
 
 By default deleted files are moved to a local `.accord-trash/` directory rather than permanently removed. Pass `--delete` to hard-delete instead. Trash contents are never synced to the server.
 
-## Default ignore patterns
+## Default Ignore Patterns
 
 The watcher skips these paths automatically:
 
