@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,6 +47,24 @@ describe('on-change hook', () => {
     expect(record?.prompt).toContain('@@ -0,0 +1,1 @@')
     expect(record?.prompt).toContain('+# Hello')
     expect(record?.prompt).not.toContain('Index: notes/hello.md')
+  })
+
+  it('prepends prefix text loaded from a file', async () => {
+    const clientA = await startWatcher(server.wsUrl, watchers, { userName: 'Agent' })
+    const outputPath = path.join(hookDir, 'prefix-file.jsonl')
+    const prefixPath = path.join(hookDir, 'prefix.txt')
+    await writeFile(prefixPath, 'Prefix from file\nSecond line\n', 'utf8')
+    const clientB = await startWatcher(server.wsUrl, watchers, {
+      userName: 'Human',
+      onChangeCommand: createHookCommand(outputPath),
+      onChangePrefix: await readFile(prefixPath, 'utf8'),
+    })
+
+    await clientA.write('notes/file-prefix.md', 'hola')
+    await waitForContent(clientB.root, 'notes/file-prefix.md', 'hola')
+
+    const [record] = await waitForHookRecords(outputPath, 1)
+    expect(record?.prompt).toContain('Prefix from file\nSecond line\n\nThe following documents changed:\n\n')
   })
 
   it('does not run the hook for initial sync content', async () => {

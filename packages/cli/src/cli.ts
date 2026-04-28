@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startAccordWatcher } from './watcher.js'
 import { loadCredentials } from './credentials.js'
+import { resolveOnChangePrefix } from './on-change.js'
 import { createAuthCommand } from './commands/auth.js'
 import { createVaultCommand } from './commands/vault.js'
 import { createTokenCommand } from './commands/token.js'
@@ -24,6 +25,7 @@ program
   .option('--ignore <patterns...>', 'additional ignore patterns')
   .option('--on-change <command>', 'shell command to run when remote document changes arrive')
   .option('--on-change-prefix <text>', 'text prepended to the on-change prompt piped to stdin')
+  .option('--on-change-prefix-file <path>', 'read the on-change prefix text from a file')
   .action(async (dir: string, opts: {
     server?: string
     user?: string
@@ -33,6 +35,7 @@ program
     ignore?: string[]
     onChange?: string
     onChangePrefix?: string
+    onChangePrefixFile?: string
   }) => {
     // Resolve credentials: --token flag takes priority, then credentials file.
     let serverUrl = opts.server
@@ -50,6 +53,10 @@ program
 
     serverUrl ??= 'ws://localhost:1234'
     userName ??= 'CLI'
+    const onChangePrefix = await resolveOnChangePrefix({
+      onChangePrefix: opts.onChangePrefix,
+      onChangePrefixFile: opts.onChangePrefixFile,
+    })
 
     const root = path.resolve(dir)
     console.log(`Syncing ${root} ↔ ${serverUrl} (vault: ${opts.vault})`)
@@ -63,7 +70,7 @@ program
       deletionBehavior: opts.delete ? 'delete' : 'trash',
       ignorePatterns: opts.ignore,
       onChangeCommand: opts.onChange,
-      onChangePrefix: opts.onChangePrefix,
+      onChangePrefix,
     })
 
     console.log('Ready. Press Ctrl+C to stop.')

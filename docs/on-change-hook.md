@@ -34,6 +34,18 @@ accord watch ./docs \
   --on-change-prefix "$(cat .accord-prompt)"
 ```
 
+### `--on-change-prefix-file <path>`
+
+Reads the prefix text from a file and prepends it to the prompt. This is the preferred option for longer prompts because it avoids shell quoting and substitution.
+
+```bash
+accord watch ./docs \
+  --on-change "codex --full-auto" \
+  --on-change-prefix-file .accord-prompt
+```
+
+`--on-change-prefix` and `--on-change-prefix-file` are mutually exclusive.
+
 ## Prompt Format
 
 The prompt piped to the command's stdin has the following structure:
