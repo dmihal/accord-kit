@@ -155,8 +155,9 @@ async function handleIdentityRequest(
     const vaultId = decodeURIComponent(vaultMatch[1] ?? '')
     const subRoute = vaultMatch[2] ?? ''
     const auth = requireAuth(store, request)
+    const members = store.listMembers(vaultId)
 
-    if (!store.hasVaultAccess(auth.identityId, vaultId)) throw new ApiError(403, 'Forbidden')
+    if (!members.some((member) => member.identityId === auth.identityId)) throw new ApiError(403, 'Forbidden')
 
     if (method === 'POST' && subRoute === '/invites') {
       const body = await readJsonBody<{ ttlDays?: number }>(request)
@@ -188,7 +189,6 @@ async function handleIdentityRequest(
     }
 
     if (method === 'GET' && subRoute === '/members') {
-      const members = store.listMembers(vaultId)
       sendJson(response, 200, members, corsHeaders)
       return
     }

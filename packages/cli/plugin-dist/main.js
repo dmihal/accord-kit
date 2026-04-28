@@ -5189,6 +5189,22 @@ function createIgnoreMatcher(patterns = []) {
   };
 }
 
+// ../core/dist/vaults.js
+var VAULT_ID_RE = /^[a-z0-9][a-z0-9-_]{0,63}$/;
+var INTERNAL_DOCUMENT_PREFIX = "__accord_vault__";
+function isValidVaultId(value) {
+  return VAULT_ID_RE.test(value);
+}
+function assertVaultId(value) {
+  if (!isValidVaultId(value)) {
+    throw new Error(`Invalid vault ID "${value}"`);
+  }
+  return value;
+}
+function toVaultDocumentName(vaultId, documentId) {
+  return `${INTERNAL_DOCUMENT_PREFIX}/${assertVaultId(vaultId)}/${Buffer.from(documentId, "utf8").toString("base64url")}`;
+}
+
 // ../../node_modules/.pnpm/lib0@0.2.117/node_modules/lib0/math.js
 var floor = Math.floor;
 var abs = Math.abs;
@@ -14030,10 +14046,10 @@ var DocPool = class {
     const syncTimer = setTimeout(() => {
       settleError(new Error(`Timed out syncing "${documentId}"`));
     }, this.syncTimeoutMs);
-    const wsUrl = this.config.vaultId ? `${this.config.serverUrl}?vault=${encodeURIComponent(this.config.vaultId)}` : this.config.serverUrl;
+    const vaultId = this.config.vaultId ?? "default";
     const provider = new HocuspocusProvider({
-      url: wsUrl,
-      name: documentId,
+      url: buildVaultWebSocketUrl(this.config.serverUrl, vaultId, this.config.userName),
+      name: toVaultDocumentName(vaultId, documentId),
       document: ydoc,
       token: this.config.token,
       WebSocketPolyfill: wrapper_default,
@@ -14099,6 +14115,12 @@ var DocPool = class {
     }
   }
 };
+function buildVaultWebSocketUrl(baseUrl, vaultId, userName) {
+  const url = new URL(baseUrl);
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}`;
+  url.searchParams.set("user", userName);
+  return url.toString();
+}
 
 // ../cli/dist/watcher.js
 var import_node_child_process = require("node:child_process");
@@ -16309,6 +16331,7 @@ function splitLines(text) {
 // ../cli/dist/watcher.js
 var import_promises4 = require("node:fs/promises");
 var import_node_http = require("node:http");
+var import_node_https = require("node:https");
 var import_node_path3 = __toESM(require("node:path"), 1);
 async function startAccordWatcher(config) {
   await (0, import_promises4.mkdir)(config.root, { recursive: true });
@@ -16339,13 +16362,15 @@ var TextFileWatcher = class {
   constructor(config) {
     this.config = config;
     this.ignoreMatcher = createIgnoreMatcher(config.ignorePatterns);
+    const vaultId = config.vaultId ?? "default";
     this.docPool = new DocPool({
-      serverUrl: config.serverUrl,
-      userName: config.userName,
+      serverUrl: buildVaultWebSocketUrl2(config.serverUrl, vaultId, config.userName),
       token: config.token,
-      vaultId: config.vaultId
+      userName: config.userName,
+      syncTimeoutMs: config.syncTimeoutMs,
+      vaultId
     });
-    this.manifestUrl = new URL("/documents", config.serverUrl.replace(/^ws/, "http")).toString();
+    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, vaultId);
   }
   async start() {
     this.watcher = esm_default.watch(this.config.root, {
@@ -16465,7 +16490,7 @@ var TextFileWatcher = class {
     return filePaths;
   }
   async pollManifest() {
-    const documentIds = await httpGetJson(this.manifestUrl);
+    const documentIds = await httpGetJson(this.manifestUrl, this.config.token);
     await Promise.all(documentIds.map(async (documentId) => {
       const safeDocumentId = assertSafeDocumentId(documentId);
       if (this.knownDocuments.has(safeDocumentId) || !this.shouldSync(safeDocumentId))
@@ -16677,9 +16702,24 @@ function waitForWatcherReady(watcher) {
     watcher.once("ready", resolve3);
   });
 }
-function httpGetJson(url) {
+function buildVaultWebSocketUrl2(baseUrl, vaultId, userName) {
+  const url = new URL(baseUrl);
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}`;
+  url.searchParams.set("user", userName);
+  return url.toString();
+}
+function buildVaultManifestUrl(baseUrl, vaultId) {
+  const url = new URL(baseUrl.replace(/^ws/, "http"));
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}/documents`;
+  url.search = "";
+  return url.toString();
+}
+function httpGetJson(url, token) {
   return new Promise((resolve3, reject) => {
-    (0, import_node_http.get)(url, (res) => {
+    const get = url.startsWith("https:") ? import_node_https.get : import_node_http.get;
+    get(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : void 0
+    }, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`Failed to fetch document manifest: ${res.statusCode}`));
         res.resume();
