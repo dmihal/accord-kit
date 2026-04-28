@@ -6,9 +6,14 @@ export const DEFAULT_SERVER_PORT = 1234
 export const DEFAULT_SQLITE_PATH = './data.db'
 export const DEFAULT_BINARY_STORAGE_DIR = './binary'
 
+export type AuthMode = 'open' | 'key'
+
 export interface AccordServerConfig {
   address: string
   port: number
+  auth: {
+    mode: AuthMode
+  }
   persistence: {
     path: string
   }
@@ -35,6 +40,9 @@ export function defaultServerConfig(): AccordServerConfig {
   return {
     address: DEFAULT_SERVER_ADDRESS,
     port: DEFAULT_SERVER_PORT,
+    auth: {
+      mode: 'open',
+    },
     persistence: {
       path: DEFAULT_SQLITE_PATH,
     },
@@ -75,11 +83,16 @@ function applyEnvOverrides(config: AccordServerConfig, env: NodeJS.ProcessEnv): 
   const portValue = env.ACCORD_SERVER_PORT ?? env.ACCORD_PORT
   const persistencePath = env.ACCORD_SQLITE_PATH ?? env.ACCORD_DB_PATH ?? config.persistence.path
   const storageDir = env.ACCORD_BINARY_STORAGE_DIR ?? env.ACCORD_BINARY_DIR ?? config.binary.storageDir
+  const authMode = (env.ACCORD_AUTH_MODE as AuthMode | undefined) ?? config.auth.mode
 
   return {
     ...config,
     address,
     port: portValue ? parsePort(portValue) : config.port,
+    auth: {
+      ...config.auth,
+      mode: authMode,
+    },
     persistence: {
       ...config.persistence,
       path: persistencePath,
@@ -95,6 +108,10 @@ function mergeConfig(base: AccordServerConfig, override: Partial<AccordServerCon
   return {
     ...base,
     ...override,
+    auth: {
+      ...base.auth,
+      ...override.auth,
+    },
     persistence: {
       ...base.persistence,
       ...override.persistence,

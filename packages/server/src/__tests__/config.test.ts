@@ -14,6 +14,7 @@ describe('server config', () => {
     expect(defaultServerConfig()).toEqual({
       address: '127.0.0.1',
       port: 1234,
+      auth: { mode: 'open' },
       persistence: {
         path: './data.db',
       },
@@ -44,6 +45,7 @@ describe('server config', () => {
     await expect(loadServerConfig({ configPath, env: {} })).resolves.toEqual({
       address: '127.0.0.2',
       port: 4321,
+      auth: { mode: 'open' },
       persistence: {
         path: './custom.db',
       },

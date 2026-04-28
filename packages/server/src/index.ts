@@ -1,3 +1,5 @@
 export * from './config.js'
 export * from './routes.js'
 export * from './server.js'
+export * from './auth/key-store.js'
+export * from './auth/key.js'

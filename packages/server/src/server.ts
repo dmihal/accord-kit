@@ -1,7 +1,9 @@
 import { SQLite } from '@hocuspocus/extension-sqlite'
 import { Server, type Extension, type Hocuspocus } from '@hocuspocus/server'
 import type { AccordServerConfig } from './config.js'
-import { createDocumentsRouteExtension } from './routes.js'
+import { runMigrations, KeyStore } from './auth/key-store.js'
+import { createKeyVerifier } from './auth/key.js'
+import { createDocumentsRouteExtension, createIdentityRouteExtension } from './routes.js'
 
 export function createAccordServer(config: AccordServerConfig): Server {
   const sqlite = new SQLite({
@@ -20,6 +22,12 @@ export function createAccordServer(config: AccordServerConfig): Server {
     extensions.unshift(createVerboseLogger())
   }
 
+  extensions.push({
+    async onListen() {
+      console.log(`Auth mode: ${config.auth.mode}`)
+    },
+  })
+
   const server = new Server({
     address: config.address,
     port: config.port,
@@ -29,7 +37,35 @@ export function createAccordServer(config: AccordServerConfig): Server {
     extensions,
   })
 
+  // patchListenHost must be called first so the key-mode wrapper below can
+  // wrap the already-patched listen.
   patchListenHost(server)
+
+  if (config.auth.mode === 'key') {
+    const patchedListen = server.listen.bind(server)
+    server.listen = async (port?: number, callback?: unknown): Promise<Hocuspocus> => {
+      const result = await patchedListen(port, callback)
+
+      const db = (sqlite as { db?: unknown }).db
+      if (!db) throw new Error('SQLite database not initialized')
+
+      const store = new KeyStore(db)
+      runMigrations(db)
+
+      server.hocuspocus.configuration.extensions.push(createIdentityRouteExtension(store))
+
+      const verifier = createKeyVerifier(store)
+      server.hocuspocus.configuration.extensions.push({
+        async onAuthenticate({ token, requestParameters }) {
+          const vaultId = requestParameters.get('vault') ?? 'default'
+          return verifier.authenticate(token, vaultId)
+        },
+      })
+
+      return result
+    }
+  }
+
   return server
 }
 

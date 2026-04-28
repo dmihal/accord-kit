@@ -2,6 +2,7 @@ import {
   App,
   FileSystemAdapter,
   MarkdownView,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -14,6 +15,8 @@ import { CursorPresenceManager } from './cursor-presence.js'
 interface AccordKitSettings {
   serverUrl: string
   userName: string
+  apiKey: string
+  vaultId: string
   ignoredFolders: string[]
   deletionBehavior: 'trash' | 'delete'
 }
@@ -21,6 +24,8 @@ interface AccordKitSettings {
 const DEFAULT_SETTINGS: AccordKitSettings = {
   serverUrl: 'ws://localhost:1234',
   userName: 'Obsidian',
+  apiKey: '',
+  vaultId: 'default',
   ignoredFolders: [],
   deletionBehavior: 'trash',
 }
@@ -112,6 +117,8 @@ export default class AccordKitPlugin extends Plugin {
       root: vaultPath,
       serverUrl: this.settings.serverUrl,
       userName: this.settings.userName,
+      token: this.settings.apiKey || undefined,
+      vaultId: this.settings.vaultId || 'default',
       deletionBehavior: this.settings.deletionBehavior,
       ignorePatterns: this.settings.ignoredFolders.map((f) => `${f.replace(/\/$/, '')}/`),
     })
@@ -154,6 +161,47 @@ export default class AccordKitPlugin extends Plugin {
   }
 }
 
+class RedeemModal extends Modal {
+  private code = ''
+  private name = ''
+  private onRedeem: (code: string, name: string) => void
+
+  constructor(app: App, onRedeem: (code: string, name: string) => void) {
+    super(app)
+    this.onRedeem = onRedeem
+  }
+
+  onOpen(): void {
+    const { contentEl } = this
+    contentEl.createEl('h3', { text: 'Redeem invite code' })
+
+    new Setting(contentEl)
+      .setName('Invite code')
+      .addText((t) => t.setPlaceholder('accord_inv_...').onChange((v) => { this.code = v.trim() }))
+
+    new Setting(contentEl)
+      .setName('Identity name')
+      .setDesc('A label for this device, e.g. "My MacBook".')
+      .addText((t) => t.setPlaceholder('My MacBook').onChange((v) => { this.name = v.trim() }))
+
+    new Setting(contentEl).addButton((btn) =>
+      btn
+        .setButtonText('Redeem')
+        .setCta()
+        .onClick(() => {
+          if (!this.code) { new Notice('Invite code is required.'); return }
+          if (!this.name) { new Notice('Identity name is required.'); return }
+          this.onRedeem(this.code, this.name)
+          this.close()
+        }),
+    )
+  }
+
+  onClose(): void {
+    this.contentEl.empty()
+  }
+}
+
 class AccordKitSettingTab extends PluginSettingTab {
   constructor(
     app: App,
@@ -175,6 +223,63 @@ class AccordKitSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.serverUrl)
           .onChange(async (value) => {
             this.plugin.settings.serverUrl = value.trim()
+            await this.plugin.saveSettings()
+          }),
+      )
+
+    new Setting(containerEl)
+      .setName('API key')
+      .setDesc('Your accord_sk_... key. Leave empty for open (unauthenticated) mode.')
+      .addText((text) => {
+        text
+          .setPlaceholder('accord_sk_...')
+          .setValue(this.plugin.settings.apiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.apiKey = value.trim()
+            await this.plugin.saveSettings()
+          })
+        text.inputEl.type = 'password'
+      })
+
+    new Setting(containerEl)
+      .setName('Import invite code')
+      .setDesc('Redeem an invite code to get a key from the server.')
+      .addButton((btn) =>
+        btn.setButtonText('Redeem invite…').onClick(() => {
+          new RedeemModal(this.app, async (code, name) => {
+            const serverUrl = this.plugin.settings.serverUrl
+            if (!serverUrl) { new Notice('Set the server URL first.'); return }
+
+            const httpUrl = serverUrl.replace(/^ws:\/\//, 'http://').replace(/^wss:\/\//, 'https://')
+            try {
+              const res = await fetch(`${httpUrl}/auth/redeem`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, name }),
+              })
+              const data = await res.json() as { key?: string; error?: string }
+              if (!res.ok || !data.key) throw new Error(data.error ?? `HTTP ${res.status}`)
+
+              this.plugin.settings.apiKey = data.key
+              this.plugin.settings.userName = name
+              await this.plugin.saveSettings()
+              new Notice('Key saved. AccordKit is now authenticated.')
+            } catch (err) {
+              new Notice(`Redeem failed: ${err instanceof Error ? err.message : String(err)}`)
+            }
+          }).open()
+        }),
+      )
+
+    new Setting(containerEl)
+      .setName('Vault')
+      .setDesc('The vault name to sync with (default: "default").')
+      .addText((text) =>
+        text
+          .setPlaceholder('default')
+          .setValue(this.plugin.settings.vaultId)
+          .onChange(async (value) => {
+            this.plugin.settings.vaultId = value.trim() || 'default'
             await this.plugin.saveSettings()
           }),
       )
