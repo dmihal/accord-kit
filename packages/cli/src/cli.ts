@@ -22,6 +22,8 @@ program
   .option('--token <key>', 'API key (overrides credentials file)')
   .option('--delete', 'permanently delete files on remote deletion (default: move to .accord-trash)')
   .option('--ignore <patterns...>', 'additional ignore patterns')
+  .option('--on-change <command>', 'shell command to run when remote document changes arrive')
+  .option('--on-change-prefix <text>', 'text prepended to the on-change prompt piped to stdin')
   .action(async (dir: string, opts: {
     server?: string
     user?: string
@@ -29,6 +31,8 @@ program
     token?: string
     delete?: boolean
     ignore?: string[]
+    onChange?: string
+    onChangePrefix?: string
   }) => {
     // Resolve credentials: --token flag takes priority, then credentials file.
     let serverUrl = opts.server
@@ -58,6 +62,8 @@ program
       token: key,
       deletionBehavior: opts.delete ? 'delete' : 'trash',
       ignorePatterns: opts.ignore,
+      onChangeCommand: opts.onChange,
+      onChangePrefix: opts.onChangePrefix,
     })
 
     console.log('Ready. Press Ctrl+C to stop.')

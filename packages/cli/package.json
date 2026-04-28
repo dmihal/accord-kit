@@ -31,6 +31,7 @@
     "@hocuspocus/provider": "^4.0.0",
     "chokidar": "^4.0.0",
     "commander": "^13.0.0",
+    "diff": "^9.0.0",
     "yjs": "^13.6.0"
   }
 }

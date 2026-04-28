@@ -7,7 +7,9 @@ import {
   resolveSafeStoragePath,
   toDocumentId,
 } from '@accord-kit/core'
+import { spawn, type ChildProcess } from 'node:child_process'
 import chokidar, { type FSWatcher } from 'chokidar'
+import { createPatch } from 'diff'
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { get as httpGet } from 'node:http'
 import path from 'node:path'
@@ -24,6 +26,8 @@ export interface WatcherConfig {
   ignorePatterns?: string[]
   manifestPollMs?: number
   deletionBehavior?: 'trash' | 'delete'
+  onChangeCommand?: string
+  onChangePrefix?: string
 }
 
 export interface AccordWatcher {
@@ -46,12 +50,18 @@ class TextFileWatcher implements AccordWatcher {
   private readonly observedDocuments = new Set<string>()
   private readonly locallyDeletedDocuments = new Set<string>()
   private readonly recentWrites = new Map<string, string>()
+  private readonly lastKnownContent = new Map<string, string>()
+  private readonly pendingRemoteChanges = new Map<string, PendingChange>()
   private readonly pendingLocalChanges = new Map<string, NodeJS.Timeout>()
   private readonly directoryScanTimers = new Set<NodeJS.Timeout>()
   private readonly manifestUrl: string
   private metadata?: { map: Y.Map<DeletionRecord>; synced: Promise<void> }
   private watcher?: FSWatcher
   private manifestInterval?: NodeJS.Timeout
+  private onChangeInitialized = false
+  private onChangeCommandRunning = false
+  private onChangeChild?: ChildProcess
+  private stopping = false
 
   constructor(private readonly config: WatcherConfig) {
     this.ignoreMatcher = createIgnoreMatcher(config.ignorePatterns)
@@ -87,6 +97,7 @@ class TextFileWatcher implements AccordWatcher {
     await this.initializeDeletionMetadata()
     await this.scanLocalFiles()
     await this.pollManifest()
+    this.onChangeInitialized = true
     this.manifestInterval = setInterval(() => {
       void this.pollManifest()
     }, this.config.manifestPollMs ?? 500)
@@ -97,9 +108,11 @@ class TextFileWatcher implements AccordWatcher {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true
     if (this.manifestInterval) clearInterval(this.manifestInterval)
     for (const timer of this.directoryScanTimers) clearTimeout(timer)
     for (const timer of this.pendingLocalChanges.values()) clearTimeout(timer)
+    this.onChangeChild?.kill('SIGTERM')
     await this.watcher?.close()
     this.docPool.destroy()
   }
@@ -126,6 +139,7 @@ class TextFileWatcher implements AccordWatcher {
 
     this.clearDeletionRecord(documentId)
     this.knownDocuments.add(documentId)
+    this.lastKnownContent.set(documentId, content)
     this.attachRemoteWriter(documentId)
     await this.docPool.applyContent(documentId, content)
   }
@@ -139,6 +153,8 @@ class TextFileWatcher implements AccordWatcher {
     }
 
     this.knownDocuments.delete(documentId)
+    this.lastKnownContent.delete(documentId)
+    this.pendingRemoteChanges.delete(documentId)
     this.docPool.close(documentId)
     await this.setDeletionRecord(documentId)
   }
@@ -207,7 +223,9 @@ class TextFileWatcher implements AccordWatcher {
         this.knownDocuments.add(safeDocumentId)
         const handle = this.attachRemoteWriter(safeDocumentId)
         await handle.synced
-        await this.writeRemoteContent(safeDocumentId, handle.yText.toString())
+        const content = handle.yText.toString()
+        this.lastKnownContent.set(safeDocumentId, content)
+        await this.writeRemoteContent(safeDocumentId, content)
       }),
     )
   }
@@ -219,10 +237,98 @@ class TextFileWatcher implements AccordWatcher {
     this.observedDocuments.add(documentId)
     handle.yText.observe((_event, transaction) => {
       if (transaction.local) return
-      void this.writeRemoteContent(documentId, handle.yText.toString())
+      void this.handleRemoteChange(documentId, handle.yText.toString())
     })
 
     return handle
+  }
+
+  private async handleRemoteChange(documentId: string, content: string): Promise<void> {
+    if (!this.onChangeInitialized || !this.config.onChangeCommand) {
+      this.lastKnownContent.set(documentId, content)
+      await this.writeRemoteContent(documentId, content)
+      return
+    }
+
+    if (this.lastKnownContent.get(documentId) === content) {
+      await this.writeRemoteContent(documentId, content)
+      return
+    }
+
+    this.pendingRemoteChanges.set(documentId, { documentId, content })
+    void this.runOnChangeCommandQueue()
+    await this.writeRemoteContent(documentId, content)
+  }
+
+  private async runOnChangeCommandQueue(): Promise<void> {
+    if (this.onChangeCommandRunning || this.pendingRemoteChanges.size === 0 || !this.config.onChangeCommand) return
+
+    this.onChangeCommandRunning = true
+
+    try {
+      while (this.pendingRemoteChanges.size > 0) {
+        const pendingChanges = [...this.pendingRemoteChanges.values()]
+        this.pendingRemoteChanges.clear()
+
+        const diffs = pendingChanges.flatMap(({ documentId, content }) => {
+          const previousContent = this.lastKnownContent.get(documentId) ?? ''
+          if (previousContent === content) return []
+
+          this.lastKnownContent.set(documentId, content)
+          return [createUnifiedDiff(documentId, previousContent, content)]
+        })
+
+        if (diffs.length === 0) continue
+
+        const prompt = formatOnChangePrompt(diffs, this.config.onChangePrefix)
+        await this.executeOnChangeCommand(prompt)
+      }
+    } finally {
+      this.onChangeCommandRunning = false
+    }
+  }
+
+  private async executeOnChangeCommand(prompt: string): Promise<void> {
+    const command = this.config.onChangeCommand
+    if (!command) return
+
+    await new Promise<void>((resolve) => {
+      const child = spawn(command, {
+        shell: true,
+        stdio: ['pipe', 'inherit', 'inherit'],
+      })
+      this.onChangeChild = child
+
+      let settled = false
+      const finish = (message?: string) => {
+        if (settled) return
+        settled = true
+        this.onChangeChild = undefined
+        if (message) console.error(message)
+        resolve()
+      }
+
+      child.once('error', (error) => {
+        finish(`On-change command failed: ${error.message}`)
+      })
+
+      child.once('close', (code, signal) => {
+        if (signal && !this.stopping) {
+          finish(`On-change command exited from signal ${signal}`)
+          return
+        }
+
+        if ((code ?? 0) !== 0) {
+          finish(`On-change command exited with code ${code ?? 'unknown'}`)
+          return
+        }
+
+        finish()
+      })
+
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(prompt)
+    })
   }
 
   private async writeRemoteContent(documentId: string, content: string): Promise<void> {
@@ -327,6 +433,29 @@ interface DeletionRecord {
   deleted: boolean
   deletedAt: string
   deletedBy: string
+}
+
+interface PendingChange {
+  documentId: string
+  content: string
+}
+
+function createUnifiedDiff(documentId: string, previousContent: string, nextContent: string): string {
+  return createPatch(documentId, previousContent, nextContent)
+    .replace(/^Index: [^\n]+\n=+\n/, '')
+    .trimEnd()
+}
+
+function formatOnChangePrompt(diffs: string[], prefix?: string): string {
+  const sections: string[] = []
+
+  if (prefix && prefix.trim().length > 0) {
+    sections.push(prefix.trimEnd())
+  }
+
+  sections.push(`The following documents changed:\n\n${diffs.join('\n\n')}`)
+
+  return `${sections.join('\n\n')}\n`
 }
 
 function isNotFoundError(error: unknown): boolean {

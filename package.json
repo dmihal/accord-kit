@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:unit": "vitest run packages",
     "test:integration": "vitest run tests/integration --passWithNoTests",
+    "test:integration:codex": "ACCORD_RUN_CODEX_TRANSLATION_E2E=1 vitest run tests/integration/codex-translation.test.ts",
     "test:watch": "vitest"
   },
   "devDependencies": {
