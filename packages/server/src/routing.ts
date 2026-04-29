@@ -21,7 +21,7 @@ export function parseVaultPathname(pathname: string): ParsedVaultPath {
   return { vaultId: null, route: pathname || '/' }
 }
 
-export function resolveVaultReferenceFromUrl(value: string | URL, allowImplicitDefault: boolean): string | null {
+export function resolveVaultReferenceFromUrl(value: string | URL): string | null {
   const url = value instanceof URL ? value : toAbsoluteUrl(value)
   const parsed = parseVaultPathname(url.pathname)
 
@@ -30,20 +30,16 @@ export function resolveVaultReferenceFromUrl(value: string | URL, allowImplicitD
   const queryVault = url.searchParams.get('vault')?.trim()
   if (queryVault) return queryVault
 
-  if (allowImplicitDefault && (url.pathname === '/' || url.pathname === '' || url.pathname === '/documents')) {
-    return 'default'
-  }
-
   return null
 }
 
-export function resolveVaultIdFromUrl(value: string | URL, allowImplicitDefault: boolean): string | null {
-  const reference = resolveVaultReferenceFromUrl(value, allowImplicitDefault)
+export function resolveVaultIdFromUrl(value: string | URL): string | null {
+  const reference = resolveVaultReferenceFromUrl(value)
   return reference ? assertVaultId(reference) : null
 }
 
-export function resolveVaultIdFromPathname(pathname: string, allowImplicitDefault: boolean): string | null {
-  return resolveVaultIdFromUrl(toAbsoluteUrl(pathname), allowImplicitDefault)
+export function resolveVaultIdFromPathname(pathname: string): string | null {
+  return resolveVaultIdFromUrl(toAbsoluteUrl(pathname))
 }
 
 export function isValidRequestedVaultId(value: string | null): value is string {

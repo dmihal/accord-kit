@@ -33,9 +33,9 @@ export class AccordAuth {
     const url = toAbsoluteUrl(input.request.url)
 
     const authenticated = this.config.mode === 'open'
-      ? authenticateOpenRequest(input.request, resolveRequiredVaultId(url, true))
+      ? authenticateOpenRequest(input.request, resolveRequiredVaultId(url))
       : this.config.mode === 'jwt'
-        ? this.authenticateJwt(input.token, resolveRequiredVaultId(url, false))
+        ? this.authenticateJwt(input.token, resolveRequiredVaultId(url))
         : this.authenticateKey(input.token, resolveRequiredVaultReference(url))
 
     await this.assertVaultExists(authenticated.vaultId)
@@ -48,7 +48,7 @@ export class AccordAuth {
     vaultId?: string
   }): Promise<AuthenticatedRequest> {
     if (this.config.mode === 'open') {
-      const vaultId = input.vaultId ?? resolveVaultIdFromUrl(toAbsoluteUrl(input.request.url ?? '/'), true)
+      const vaultId = input.vaultId ?? resolveVaultIdFromUrl(toAbsoluteUrl(input.request.url ?? '/'))
       if (!vaultId) throw new HttpError(404, 'not found')
       await this.assertVaultExists(vaultId)
       return authenticateOpenRequest(input.request, vaultId)
@@ -58,13 +58,13 @@ export class AccordAuth {
     if (!token) throw new HttpError(401, 'missing bearer token')
 
     if (this.config.mode === 'jwt') {
-      const vaultId = input.vaultId ?? resolveVaultIdFromUrl(toAbsoluteUrl(input.request.url ?? '/'), false)
+      const vaultId = input.vaultId ?? resolveVaultIdFromUrl(toAbsoluteUrl(input.request.url ?? '/'))
       if (!vaultId) throw new HttpError(404, 'not found')
       await this.assertVaultExists(vaultId)
       return this.authenticateJwt(token, vaultId)
     }
 
-    const requestedVault = input.vaultId ?? resolveVaultReferenceFromUrl(toAbsoluteUrl(input.request.url ?? '/'), false)
+    const requestedVault = input.vaultId ?? resolveVaultReferenceFromUrl(toAbsoluteUrl(input.request.url ?? '/'))
     if (!requestedVault) throw new HttpError(404, 'not found')
     const authenticated = this.authenticateKey(token, requestedVault)
     await this.assertVaultExists(authenticated.vaultId)
@@ -165,14 +165,14 @@ export function extractBearerToken(headerValue: string | string[] | undefined): 
   return match?.[1] ?? null
 }
 
-function resolveRequiredVaultId(url: URL, allowImplicitDefault: boolean): string {
-  const vaultId = resolveVaultIdFromUrl(url, allowImplicitDefault)
+function resolveRequiredVaultId(url: URL): string {
+  const vaultId = resolveVaultIdFromUrl(url)
   if (!vaultId) throw new Error('invalid vault')
   return vaultId
 }
 
 function resolveRequiredVaultReference(url: URL): string {
-  const vault = resolveVaultReferenceFromUrl(url, false)
+  const vault = resolveVaultReferenceFromUrl(url)
   if (!vault) throw new Error('invalid vault')
   return vault
 }

@@ -22,8 +22,8 @@ export interface WatcherConfig {
   root: string
   serverUrl: string
   userName: string
+  vaultId: string
   token?: string
-  vaultId?: string
   syncTimeoutMs?: number
   ignorePatterns?: string[]
   manifestPollMs?: number
@@ -67,15 +67,14 @@ class TextFileWatcher implements AccordWatcher {
 
   constructor(private readonly config: WatcherConfig) {
     this.ignoreMatcher = createIgnoreMatcher(config.ignorePatterns)
-    const vaultId = config.vaultId ?? 'default'
     this.docPool = new DocPool({
-      serverUrl: buildVaultWebSocketUrl(config.serverUrl, vaultId, config.userName),
+      serverUrl: buildVaultWebSocketUrl(config.serverUrl, config.vaultId, config.userName),
       token: config.token,
       userName: config.userName,
       syncTimeoutMs: config.syncTimeoutMs,
-      vaultId,
+      vaultId: config.vaultId,
     })
-    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, vaultId)
+    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, config.vaultId)
   }
 
   async start(): Promise<void> {

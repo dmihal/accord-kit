@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { startAuthTestServer, type AuthTestServer } from './helpers/server.js'
+import { startAuthTestServer, startTestServer, type AuthTestServer, type TestServer } from './helpers/server.js'
 import { generateKey } from '@accord-kit/server'
 
-let srv: AuthTestServer | null = null
+let srv: TestServer | AuthTestServer | null = null
 
 afterEach(async () => {
   await srv?.stop()
@@ -30,38 +30,63 @@ async function del(url: string, key?: string) {
   return res.status
 }
 
-describe('identity bootstrap', () => {
-  it('creates default vault and admin identity', async () => {
-    srv = await startAuthTestServer()
-    const { data, status } = await get(`${srv.httpUrl}/auth/whoami`, srv.adminKey)
+describe('vault bootstrap', () => {
+  it('creates a first identity and vault without prior auth', async () => {
+    srv = await startTestServer({ authMode: 'key', vaults: [] })
+
+    const { data, status } = await post(`${srv.httpUrl}/vaults`, {
+      name: 'myteam',
+      userName: "Alice's laptop",
+    })
     expect(status).toBe(200)
-    const info = data as { identityId: string; name: string; vaults: Array<{ id: string; name: string }> }
-    expect(info.identityId).toBe(srv.adminId)
-    expect(info.name).toBe('admin')
-    expect(info.vaults.map(v => v.name)).toContain('default')
+
+    const created = data as {
+      key: string
+      identityId: string
+      userName: string
+      vaultId: string
+      name: string
+    }
+    expect(created.key).toMatch(/^accord_sk_/)
+    expect(created.userName).toBe("Alice's laptop")
+    expect(created.name).toBe('myteam')
+
+    const me = await get(`${srv.httpUrl}/auth/whoami`, created.key)
+    expect(me.status).toBe(200)
+    expect(me.data).toEqual({
+      identityId: created.identityId,
+      name: "Alice's laptop",
+      vaults: [{ id: created.vaultId, name: 'myteam' }],
+    })
+  })
+
+  it('requires a user name when bootstrapping a vault anonymously', async () => {
+    srv = await startTestServer({ authMode: 'key', vaults: [] })
+
+    const res = await post(`${srv.httpUrl}/vaults`, { name: 'myteam' })
+    expect(res.status).toBe(400)
+    expect((res.data as { error: string }).error).toMatch(/userName required/i)
   })
 })
 
 describe('invite + redeem', () => {
   it('creates a new identity when redeeming with no existing key', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    // Admin issues invite
-    const invRes = await post(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, { ttlDays: 1 }, srv.adminKey)
+    const invRes = await post(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, { ttlDays: 1 }, authSrv.userKey)
     expect(invRes.status).toBe(200)
     const { code } = invRes.data as { code: string }
 
-    // Bob redeems
-    const redeemRes = await post(`${srv.httpUrl}/auth/redeem`, { code, name: "Bob's laptop" })
+    const redeemRes = await post(`${authSrv.httpUrl}/auth/redeem`, { code, name: "Bob's laptop" })
     expect(redeemRes.status).toBe(200)
     const { key, identityId, vaultId } = redeemRes.data as { key: string; identityId: string; vaultId: string }
 
     expect(key).toMatch(/^accord_sk_/)
     expect(identityId).toBeTruthy()
-    expect(vaultId).toBe(srv.defaultVaultId)
+    expect(vaultId).toBe(authSrv.vaultId)
 
-    // Bob can whoami
-    const meRes = await get(`${srv.httpUrl}/auth/whoami`, key)
+    const meRes = await get(`${authSrv.httpUrl}/auth/whoami`, key)
     expect(meRes.status).toBe(200)
     const me = meRes.data as { name: string }
     expect(me.name).toBe("Bob's laptop")
@@ -69,50 +94,47 @@ describe('invite + redeem', () => {
 
   it('refuses to redeem an already-redeemed code', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    const invRes = await post(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, { ttlDays: 1 }, srv.adminKey)
+    const invRes = await post(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, { ttlDays: 1 }, authSrv.userKey)
     const { code } = invRes.data as { code: string }
 
-    await post(`${srv.httpUrl}/auth/redeem`, { code, name: 'First' })
-    const second = await post(`${srv.httpUrl}/auth/redeem`, { code, name: 'Second' })
+    await post(`${authSrv.httpUrl}/auth/redeem`, { code, name: 'First' })
+    const second = await post(`${authSrv.httpUrl}/auth/redeem`, { code, name: 'Second' })
     expect(second.status).toBe(400)
     expect((second.data as { error: string }).error).toMatch(/already redeemed/i)
   })
 
   it('refuses to redeem an expired code', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    // Insert an expired invite directly via the store
-    const expiredCode = srv.store.createInvite(
-      srv.defaultVaultId,
-      srv.adminId,
-      -1, // negative TTL → already expired
+    const expiredCode = authSrv.store.createInvite(
+      authSrv.vaultId,
+      authSrv.userId,
+      -1,
     )
 
-    const res = await post(`${srv.httpUrl}/auth/redeem`, { code: expiredCode.code, name: 'Late' })
+    const res = await post(`${authSrv.httpUrl}/auth/redeem`, { code: expiredCode.code, name: 'Late' })
     expect(res.status).toBe(400)
     expect((res.data as { error: string }).error).toMatch(/expired/i)
   })
 
-  it('adds vault access to an existing identity when key is provided', async () => {
+  it('adds vault access to an existing identity when a key is provided', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    // Bob already has a key (minted directly for test simplicity)
     const bobKey = generateKey()
-    const bobVault = srv.store.createVault('bobvault', srv.adminId)
-    const bobId = srv.store.createIdentity("Bob's device", bobKey).id
-    srv.store.grantVaultAccess(bobId, bobVault.id, srv.adminId)
+    const bobId = authSrv.store.createIdentity("Bob's device", bobKey).id
+    const bobVault = authSrv.store.createVault('bobvault', authSrv.userId)
+    authSrv.store.grantVaultAccess(bobId, bobVault.id, authSrv.userId)
 
-    // Admin invites Bob to the default vault
-    const invRes = await post(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, { ttlDays: 1 }, srv.adminKey)
+    const invRes = await post(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, { ttlDays: 1 }, authSrv.userKey)
     const { code } = invRes.data as { code: string }
 
-    // Bob redeems with existing key — passes key in Authorization header
-    // The redeem endpoint accepts an existing key to identify the caller.
-    // We pass the key in the Authorization header (server reads it for existing-key flow).
-    const redeemRes = await fetch(`${srv.httpUrl}/auth/redeem`, {
+    const redeemRes = await fetch(`${authSrv.httpUrl}/auth/redeem`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${bobKey}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${bobKey}` },
       body: JSON.stringify({ code, name: 'ignored' }),
     })
 
@@ -120,103 +142,59 @@ describe('invite + redeem', () => {
     const redeemBody = await redeemRes.json() as { key: string; identityId: string; vaultId: string; isNew: boolean }
     expect(redeemBody.key).toBe(bobKey)
     expect(redeemBody.identityId).toBe(bobId)
-    expect(redeemBody.vaultId).toBe(srv.defaultVaultId)
+    expect(redeemBody.vaultId).toBe(authSrv.vaultId)
     expect(redeemBody.isNew).toBe(false)
 
-    const whoami = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
+    const whoami = await get(`${authSrv.httpUrl}/auth/whoami`, bobKey)
     const vaultIds = (whoami.data as { vaults: Array<{ id: string }> }).vaults.map((vault) => vault.id)
     expect(vaultIds).toContain(bobVault.id)
-    expect(vaultIds).toContain(srv.defaultVaultId)
+    expect(vaultIds).toContain(authSrv.vaultId)
   })
 })
 
 describe('vault management', () => {
-  it('creates a vault and grants access to the creator', async () => {
+  it('creates a vault and grants access to the authenticated creator', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    const res = await post(`${srv.httpUrl}/vaults`, { name: 'myteam' }, srv.adminKey)
+    const res = await post(`${authSrv.httpUrl}/vaults`, { name: 'myteam' }, authSrv.userKey)
     expect(res.status).toBe(200)
     const { vaultId } = res.data as { vaultId: string }
 
-    // Admin should now have access to the new vault
-    const me = await get(`${srv.httpUrl}/auth/whoami`, srv.adminKey)
+    const me = await get(`${authSrv.httpUrl}/auth/whoami`, authSrv.userKey)
     const vaults = (me.data as { vaults: Array<{ id: string }> }).vaults
-    expect(vaults.map(v => v.id)).toContain(vaultId)
+    expect(vaults.map((vault) => vault.id)).toContain(vaultId)
   })
 
   it('lists members of a vault', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    const members = await get(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/members`, srv.adminKey)
+    const members = await get(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/members`, authSrv.userKey)
     expect(members.status).toBe(200)
     const list = members.data as Array<{ name: string }>
-    expect(list.some(m => m.name === 'admin')).toBe(true)
-  })
-
-  it('revokes vault access for a member', async () => {
-    srv = await startAuthTestServer()
-
-    // Create second identity and grant access
-    const bobKey = generateKey()
-    const bobId = srv.store.createIdentity('bob', bobKey).id
-    srv.store.grantVaultAccess(bobId, srv.defaultVaultId, srv.adminId)
-
-    // Verify bob has access
-    const before = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
-    expect((before.data as { vaults: Array<{ id: string }> }).vaults.map(v => v.id)).toContain(srv.defaultVaultId)
-
-    // Admin revokes
-    const status = await del(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/members/${bobId}`, srv.adminKey)
-    expect(status).toBe(204)
-
-    // Bob no longer has access
-    const after = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
-    expect((after.data as { vaults: Array<{ id: string }> }).vaults.map(v => v.id)).not.toContain(srv.defaultVaultId)
-  })
-})
-
-describe('identity revocation', () => {
-  it('revokes an identity so its key is rejected', async () => {
-    srv = await startAuthTestServer()
-
-    // Create a second identity
-    const bobKey = generateKey()
-    const bobId = srv.store.createIdentity('bob', bobKey).id
-    srv.store.grantVaultAccess(bobId, srv.defaultVaultId, srv.adminId)
-
-    // Bob can authenticate now
-    const before = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
-    expect(before.status).toBe(200)
-
-    // Admin revokes bob entirely
-    const status = await del(`${srv.httpUrl}/identities/${bobId}`, srv.adminKey)
-    expect(status).toBe(204)
-
-    // Bob's key is now rejected
-    const after = await get(`${srv.httpUrl}/auth/whoami`, bobKey)
-    expect(after.status).toBe(401)
+    expect(list.some((member) => member.name === 'owner')).toBe(true)
   })
 })
 
 describe('invite management', () => {
   it('lists and deletes invites', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
 
-    const inv = await post(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, {}, srv.adminKey)
+    const inv = await post(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, {}, authSrv.userKey)
     const { code } = inv.data as { code: string }
 
-    const list = await get(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, srv.adminKey)
+    const list = await get(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, authSrv.userKey)
     expect(list.status).toBe(200)
-    const codes = (list.data as Array<{ code: string }>).map(i => i.code)
+    const codes = (list.data as Array<{ code: string }>).map((invite) => invite.code)
     expect(codes).toContain(code)
 
-    // Delete it
-    const deleteStatus = await del(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites/${encodeURIComponent(code)}`, srv.adminKey)
+    const deleteStatus = await del(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites/${encodeURIComponent(code)}`, authSrv.userKey)
     expect(deleteStatus).toBe(204)
 
-    // Gone from list
-    const after = await get(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/invites`, srv.adminKey)
-    const afterCodes = (after.data as Array<{ code: string }>).map(i => i.code)
+    const after = await get(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/invites`, authSrv.userKey)
+    const afterCodes = (after.data as Array<{ code: string }>).map((invite) => invite.code)
     expect(afterCodes).not.toContain(code)
   })
 })
@@ -224,22 +202,25 @@ describe('invite management', () => {
 describe('auth rejection', () => {
   it('rejects requests without a key', async () => {
     srv = await startAuthTestServer()
-    const res = await get(`${srv.httpUrl}/auth/whoami`)
+    const authSrv = srv as AuthTestServer
+    const res = await get(`${authSrv.httpUrl}/auth/whoami`)
     expect(res.status).toBe(401)
   })
 
   it('rejects requests with an invalid key', async () => {
     srv = await startAuthTestServer()
-    const res = await get(`${srv.httpUrl}/auth/whoami`, 'accord_sk_totallyinvalid')
+    const authSrv = srv as AuthTestServer
+    const res = await get(`${authSrv.httpUrl}/auth/whoami`, 'accord_sk_totallyinvalid')
     expect(res.status).toBe(401)
   })
 
   it('rejects vault access for non-members', async () => {
     srv = await startAuthTestServer()
+    const authSrv = srv as AuthTestServer
     const strangerKey = generateKey()
-    srv.store.createIdentity('stranger', strangerKey)
+    authSrv.store.createIdentity('stranger', strangerKey)
 
-    const res = await get(`${srv.httpUrl}/vaults/${srv.defaultVaultId}/members`, strangerKey)
+    const res = await get(`${authSrv.httpUrl}/vaults/${authSrv.vaultId}/members`, strangerKey)
     expect(res.status).toBe(403)
   })
 })

@@ -40,43 +40,18 @@ export function createTokenCommand(): Command {
           identityId: result.identityId,
           name: name ?? 'unnamed',
           key: result.key,
+          activeVaultId: result.vaultId,
         })
         console.log(`Identity created. Key saved to credentials file.`)
       } else {
+        await saveCredentials({
+          ...existing,
+          activeVaultId: result.vaultId,
+        })
         console.log(`Vault access added to existing identity (${existing.identityId}).`)
       }
 
       console.log(`Vault: ${result.vaultId}`)
-    })
-
-  token
-    .command('revoke <identityId>')
-    .description('Revoke an identity entirely (admin only)')
-    .option('-s, --server <url>', 'server URL')
-    .option('-y, --yes', 'skip confirmation')
-    .action(async (identityId: string, opts: { server?: string; yes?: boolean }) => {
-      const creds = await loadCredentials(opts.server)
-      if (!creds) {
-        console.error('Not logged in.')
-        process.exit(1)
-      }
-
-      if (!opts.yes) {
-        const rl = readline.createInterface({ input, output })
-        try {
-          const answer = await rl.question(`Revoke identity ${identityId}? This cannot be undone. [y/N] `)
-          if (answer.trim().toLowerCase() !== 'y') {
-            console.log('Aborted.')
-            return
-          }
-        } finally {
-          rl.close()
-        }
-      }
-
-      const client = new ApiClient(creds.serverUrl, creds.key)
-      await client.revokeIdentity(identityId)
-      console.log('Identity revoked.')
     })
 
   return token

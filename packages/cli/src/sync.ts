@@ -15,8 +15,8 @@ export function stringToColor(str: string): string {
 export interface DocPoolConfig {
   serverUrl: string
   userName: string
+  vaultId: string
   token?: string
-  vaultId?: string
   syncTimeoutMs?: number
 }
 
@@ -74,10 +74,9 @@ export class DocPool {
       settleError(new Error(`Timed out syncing "${documentId}"`))
     }, this.syncTimeoutMs)
 
-    const vaultId = this.config.vaultId ?? 'default'
     const provider = new HocuspocusProvider({
-      url: buildVaultWebSocketUrl(this.config.serverUrl, vaultId, this.config.userName),
-      name: toVaultDocumentName(vaultId, documentId),
+      url: buildVaultWebSocketUrl(this.config.serverUrl, this.config.vaultId, this.config.userName),
+      name: toVaultDocumentName(this.config.vaultId, documentId),
       document: ydoc,
       token: this.config.token,
       WebSocketPolyfill: NodeWebSocket as unknown as typeof WebSocket,

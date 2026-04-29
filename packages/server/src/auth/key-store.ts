@@ -9,7 +9,6 @@ export interface Identity {
   id: string
   name: string
   keyHash: string
-  isAdmin: boolean
   createdAt: string
   revokedAt: string | null
 }
@@ -58,13 +57,6 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function ensureVaultColumn(db: Db, columnName: string, columnType: string): void {
-  const columns = db.prepare('PRAGMA table_info(vaults)').all() as Array<{ name: string }>
-  if (columns.some((column) => column.name === columnName)) return
-
-  db.exec(`ALTER TABLE vaults ADD COLUMN ${columnName} ${columnType}`)
-}
-
 export function runMigrations(db: Db): void {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -74,7 +66,6 @@ export function runMigrations(db: Db): void {
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
       key_hash    TEXT NOT NULL UNIQUE,
-      is_admin    INTEGER NOT NULL DEFAULT 0,
       created_at  TEXT NOT NULL DEFAULT (datetime('now')),
       revoked_at  TEXT
     );
@@ -106,10 +97,6 @@ export function runMigrations(db: Db): void {
 
     CREATE INDEX IF NOT EXISTS invite_codes_vault ON invite_codes (vault_id);
   `)
-
-  ensureVaultColumn(db, 'name', 'TEXT')
-  ensureVaultColumn(db, 'created_by', 'TEXT')
-  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS vaults_name_unique ON vaults (name) WHERE name IS NOT NULL;')
 }
 
 export class KeyStore {
@@ -153,44 +140,31 @@ export class KeyStore {
     `).all(identityId) as Vault[]
   }
 
-  createIdentity(name: string, rawKey: string, isAdmin = false): Identity {
+  createIdentity(name: string, rawKey: string): Identity {
     const id = generateId()
     const now = nowIso()
     const keyHash = hashKey(rawKey)
     this.db.prepare(
-      'INSERT INTO identities (id, name, key_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(id, name, keyHash, isAdmin ? 1 : 0, now)
-    return { id, name, keyHash, isAdmin, createdAt: now, revokedAt: null }
+      'INSERT INTO identities (id, name, key_hash, created_at) VALUES (?, ?, ?, ?)',
+    ).run(id, name, keyHash, now)
+    return { id, name, keyHash, createdAt: now, revokedAt: null }
   }
 
   getIdentityByKey(rawKey: string): Identity | null {
     const hash = hashKey(rawKey)
     const row = this.db.prepare(`
-      SELECT id, name, key_hash AS keyHash, is_admin AS isAdmin, created_at AS createdAt, revoked_at AS revokedAt
+      SELECT id, name, key_hash AS keyHash, created_at AS createdAt, revoked_at AS revokedAt
       FROM identities WHERE key_hash = ?
-    `).get(hash) as (Identity & { isAdmin: number | boolean }) | null
-    if (!row) return null
-    return { ...row, isAdmin: Boolean(row.isAdmin) }
+    `).get(hash) as Identity | null
+    return row
   }
 
   getIdentityById(id: string): Identity | null {
     const row = this.db.prepare(`
-      SELECT id, name, key_hash AS keyHash, is_admin AS isAdmin, created_at AS createdAt, revoked_at AS revokedAt
+      SELECT id, name, key_hash AS keyHash, created_at AS createdAt, revoked_at AS revokedAt
       FROM identities WHERE id = ?
-    `).get(id) as (Identity & { isAdmin: number | boolean }) | null
-    if (!row) return null
-    return { ...row, isAdmin: Boolean(row.isAdmin) }
-  }
-
-  listIdentities(): Identity[] {
-    return (this.db.prepare(`
-      SELECT id, name, key_hash AS keyHash, is_admin AS isAdmin, created_at AS createdAt, revoked_at AS revokedAt
-      FROM identities ORDER BY created_at
-    `).all() as (Identity & { isAdmin: number | boolean })[]).map(r => ({ ...r, isAdmin: Boolean(r.isAdmin) }))
-  }
-
-  revokeIdentity(id: string): void {
-    this.db.prepare('UPDATE identities SET revoked_at = ? WHERE id = ?').run(nowIso(), id)
+    `).get(id) as Identity | null
+    return row
   }
 
   grantVaultAccess(identityId: string, vaultId: string, grantedBy: string): void {

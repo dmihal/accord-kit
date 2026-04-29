@@ -1,8 +1,11 @@
 # @accord-kit/server
 
-WebSocket sync server for AccordKit, built on [Hocuspocus](https://hocuspocus.dev).
+WebSocket sync server for AccordKit, built on
+[Hocuspocus](https://hocuspocus.dev).
 
-The server stores text documents per vault. SQLite is the default storage backend; Postgres is also supported through the same storage interface. Clients connect over WebSocket and text files are synced via [Yjs](https://yjs.dev) CRDTs.
+The server stores text documents per vault. SQLite is the default storage
+backend; Postgres is also supported for document storage. Clients connect over
+WebSocket and text files are synced via [Yjs](https://yjs.dev) CRDTs.
 
 ## Install
 
@@ -23,24 +26,16 @@ Binds to `ws://127.0.0.1:1234` by default and stores data in `./data.db`.
 
 Options:
 
-```
+```text
   -c, --config <path>    Path to a JSON or YAML config file
   --address <address>    Address to bind
   -p, --port <port>      Port to bind
   -v, --verbose          Log every document event
 ```
 
-### `accord-server init`
-
-Initialize the SQLite database for key-auth mode, create the `default` vault, and print the first admin key.
-
-```bash
-accord-server init
-accord-server init --name "David's laptop"
-accord-server init --config accord-server.yaml
-```
-
-`init` currently requires `storage.driver: sqlite`.
+There is no `accord-server init`. In `auth.mode: key`, the first identity and
+first vault are created by the first unauthenticated `POST /vaults` request
+from a client.
 
 ## Configuration
 
@@ -80,51 +75,57 @@ Environment variables override file values:
 | `ACCORD_JWT_PUBLIC_KEY_PATH` | `auth.jwt.publicKeys[0].publicKeyPath` |
 | `ACCORD_JWT_KID` | `auth.jwt.publicKeys[0].kid` |
 
-`auth.mode` supports:
-
-- `open`: loopback/dev mode. No application-level auth; the server accepts vault URLs and synthesizes an anonymous identity.
-- `key`: invite-based identity and vault access control. This is the current multi-vault onboarding flow.
-- `jwt`: token-based vault authorization using configured public keys.
-
 ## Auth Modes
 
 ### `open`
 
-Local development mode. Clients can connect without a key. Vaults are still explicit in the URL path, and the server warns if `auth.mode=open` is bound to a non-loopback address.
+Local development mode.
+
+- No application-level key is required.
+- Clients still connect to explicit vault URLs such as
+  `ws://host:1234/vaults/<vaultId>?user=Alice`.
+- The server warns if `auth.mode=open` is bound to a non-loopback address.
 
 ### `key`
 
-Invite-based multi-vault mode.
+Invite-based identity and vault access control.
 
-1. Run `accord-server init` once and save the printed admin key.
-2. Start the server with `auth.mode: key`.
-3. Log in on the admin machine with the printed key:
+- There is no special `default` vault.
+- There is no server-wide admin role.
+- Any user can create a vault.
+- Any vault member can invite more users into that vault.
+- Redeeming an invite with an existing key adds vault access to the existing
+  identity instead of creating a new one.
+
+Typical flow:
+
+1. Start the server with `auth.mode: key`.
+2. First user creates a vault:
 
 ```bash
-accord auth login ws://localhost:1234 --invite accord_sk_...
+accord vault create team-notes --server ws://localhost:1234 --user "David's laptop"
 ```
 
-4. Create vault-scoped invites:
+3. Existing member generates an invite:
 
 ```bash
-accord vault invite default
 accord vault invite team-notes
 ```
 
-5. Redeem invites on clients:
+4. New client joins:
 
 ```bash
-accord auth login ws://localhost:1234 --invite accord_inv_...
-accord token redeem accord_inv_...
+accord join 'accord://host:1234/<vaultId>?invite=accord_inv_...&tls=0'
 ```
 
-If a client already has a key, redeeming another invite adds access to that vault on the same identity instead of creating a new identity.
-
-`key` mode currently requires `storage.driver: sqlite`, because the identity and invite store lives in the same SQLite database.
+`key` mode currently requires `storage.driver: sqlite`, because the identity
+and invite store is SQLite-backed.
 
 ### `jwt`
 
-JWT mode validates bearer tokens and enforces vault membership from the `vaults` claim. It supports sync, document listing, and `GET /vaults`, but the invite/identity management endpoints are not used in this mode.
+JWT mode validates bearer tokens and enforces vault membership from the
+`vaults` claim. It supports sync, document listing, and `GET /vaults`, but not
+the invite/identity onboarding API.
 
 Example JWT config:
 
@@ -151,8 +152,10 @@ storage:
 
 ## Vault Behavior
 
-- WebSocket clients connect to vault-scoped URLs such as `ws://host:1234/vaults/<vaultId>?user=<name>`.
-- The server stores documents by `(vaultId, documentId)`, so two vaults can both contain `notes/today.md` without collision.
+- WebSocket clients connect to explicit vault URLs such as
+  `ws://host:1234/vaults/<vaultId>?user=<name>`.
+- The server stores documents by `(vaultId, documentId)`, so two vaults can
+  both contain `notes/today.md` without collision.
 - `GET /vaults` lists vault IDs the current caller can access.
 - `GET /vaults/<vaultId>/documents` lists text documents for that vault.
 
@@ -165,9 +168,6 @@ In `key` mode the following management endpoints are also active:
 - `GET /vaults/<vaultId>/invites`
 - `DELETE /vaults/<vaultId>/invites/<code>`
 - `GET /vaults/<vaultId>/members`
-- `DELETE /vaults/<vaultId>/members/<identityId>`
-- `GET /identities`
-- `DELETE /identities/<identityId>`
 
 ## Programmatic Use
 

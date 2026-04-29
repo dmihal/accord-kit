@@ -1,7 +1,6 @@
 import { Command } from 'commander'
 import { loadServerConfig, shouldWarnForOpenBind } from './config.js'
 import { createAccordServer } from './server.js'
-import { runInit } from './bin/init.js'
 
 try { process.loadEnvFile() } catch {}
 
@@ -36,15 +35,5 @@ export async function startServerFromCli(argv = process.argv): Promise<void> {
       const server = createAccordServer(config)
       await server.listen()
     })
-
-  program
-    .command('init')
-    .description('Initialize the database, create the default vault, and print the admin key')
-    .option('-c, --config <path>', 'path to a JSON or YAML config file')
-    .option('--name <name>', 'name for the admin identity', 'admin')
-    .action(async (opts: { config?: string; name?: string }) => {
-      await runInit({ name: opts.name, config: opts.config })
-    })
-
   await program.parseAsync(argv)
 }

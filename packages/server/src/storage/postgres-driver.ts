@@ -67,7 +67,6 @@ export class PostgresDriver implements StorageDriver {
       );
     `)
 
-    await this.createVault('default')
   }
 
   async destroy(): Promise<void> {

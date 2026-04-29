@@ -16,7 +16,7 @@ describe('jwt auth', () => {
     mintToken = keys.mintToken
 
     server = await startTestServer({
-      vaults: ['default', 'other'],
+      vaults: ['alpha', 'other'],
       auth: {
         mode: 'jwt',
         issuer: 'accord-kit',
@@ -33,10 +33,10 @@ describe('jwt auth', () => {
 
   it('accepts a valid token for websocket sync', async () => {
     watcher = await startTestWatcher(server.wsUrl, {
-      vault: 'default',
+      vault: 'alpha',
       token: mintToken({
         sub: 'user-1',
-        vaults: ['default'],
+        vaults: ['alpha'],
         issuer: 'accord-kit',
         audience: 'accord-kit',
       }),
@@ -50,7 +50,7 @@ describe('jwt auth', () => {
   it('rejects websocket connections for the wrong vault claim', async () => {
     await expect(
       startTestWatcher(server.wsUrl, {
-        vault: 'default',
+        vault: 'alpha',
         token: mintToken({
           sub: 'user-1',
           vaults: ['other'],
@@ -67,10 +67,10 @@ describe('jwt auth', () => {
 
     await expect(
       startTestWatcher(server.wsUrl, {
-        vault: 'default',
+        vault: 'alpha',
         token: mintToken({
           sub: 'user-1',
-          vaults: ['default'],
+          vaults: ['alpha'],
           issuer: 'accord-kit',
           audience: 'accord-kit',
           issuedAt: now - 100,
@@ -82,13 +82,13 @@ describe('jwt auth', () => {
   })
 
   it('requires a bearer token for document listings', async () => {
-    const response = await fetch(`${server.httpUrl}/vaults/default/documents`)
+    const response = await fetch(`${server.httpUrl}/vaults/alpha/documents`)
 
     expect(response.status).toBe(401)
   })
 
   it('enforces the vault claim for document listings', async () => {
-    const response = await fetch(`${server.httpUrl}/vaults/default/documents`, {
+    const response = await fetch(`${server.httpUrl}/vaults/alpha/documents`, {
       headers: {
         Authorization: `Bearer ${mintToken({
           sub: 'user-1',

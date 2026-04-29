@@ -6,10 +6,10 @@ describe('documents route', () => {
     const extension = createDocumentsRouteExtension({
       auth: {
         authenticateHttp: vi.fn().mockResolvedValue({
-          vaultId: 'default',
+          vaultId: 'alpha',
           userId: 'user-1',
           userName: 'Alice',
-          claims: { sub: 'user-1', vaults: ['default'] },
+          claims: { sub: 'user-1', vaults: ['alpha'] },
         }),
         listAccessibleVaults: vi.fn(),
       } as never,
@@ -24,7 +24,7 @@ describe('documents route', () => {
 
     await expect(
       extension.onRequest?.({
-        request: { method: 'GET', url: '/vaults/default/documents', headers: {} } as never,
+        request: { method: 'GET', url: '/vaults/alpha/documents', headers: {} } as never,
         response: response as never,
         instance: {} as never,
       }),

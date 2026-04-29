@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Extension } from '@hocuspocus/server'
 import { AccordAuth, HttpError } from './auth/index.js'
 import { AuthError } from './auth/key.js'
-import { RedeemError, type KeyStore } from './auth/key-store.js'
+import { RedeemError, generateKey, type Identity, type KeyStore } from './auth/key-store.js'
 import { parseVaultPathname } from './routing.js'
 import type { StorageDriver } from './storage/index.js'
 
@@ -72,7 +72,7 @@ export function createIdentityRouteExtension(store: KeyStore): Extension {
       const path = url.pathname
       const method = request.method ?? 'GET'
 
-      if (!path.startsWith('/auth/') && !path.startsWith('/vaults') && !path.startsWith('/identities')) return
+      if (!path.startsWith('/auth/') && !path.startsWith('/vaults')) return
 
       const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
@@ -140,13 +140,32 @@ async function handleIdentityRequest(
   }
 
   if (method === 'POST' && path === '/vaults') {
-    const auth = requireAuth(store, request)
-    const { name } = await readJsonBody<{ name: string }>(request)
+    const { name, userName } = await readJsonBody<{ name: string; userName?: string }>(request)
     if (!name || typeof name !== 'string') throw new ApiError(400, 'name required')
+    if (userName !== undefined && typeof userName !== 'string') throw new ApiError(400, 'userName must be a string')
 
-    const vault = store.createVault(name, auth.identityId)
-    store.grantVaultAccess(auth.identityId, vault.id, auth.identityId)
-    sendJson(response, 200, { vaultId: vault.id, name: vault.name }, corsHeaders)
+    const auth = getAuthenticatedIdentity(store, request)
+    if (auth) {
+      const vault = store.createVault(name, auth.id)
+      store.grantVaultAccess(auth.id, vault.id, auth.id)
+      sendJson(response, 200, { vaultId: vault.id, name: vault.name }, corsHeaders)
+      return
+    }
+
+    const trimmedUserName = userName?.trim()
+    if (!trimmedUserName) throw new ApiError(400, 'userName required')
+
+    const key = generateKey()
+    const identity = store.createIdentity(trimmedUserName, key)
+    const vault = store.createVault(name, identity.id)
+    store.grantVaultAccess(identity.id, vault.id, identity.id)
+    sendJson(response, 200, {
+      key,
+      identityId: identity.id,
+      userName: identity.name,
+      vaultId: vault.id,
+      name: vault.name,
+    }, corsHeaders)
     return
   }
 
@@ -193,45 +212,6 @@ async function handleIdentityRequest(
       return
     }
 
-    const memberMatch = subRoute.match(/^\/members\/(.+)$/)
-    if (method === 'DELETE' && memberMatch) {
-      const memberId = decodeURIComponent(memberMatch[1] ?? '')
-      store.revokeVaultAccess(memberId, vaultId)
-      response.writeHead(204, corsHeaders)
-      response.end()
-      return
-    }
-
-    throw new ApiError(404, 'Not found')
-  }
-
-  if (path === '/identities' || path.startsWith('/identities/')) {
-    const auth = requireAuth(store, request)
-    const identity = store.getIdentityById(auth.identityId)
-    if (!identity?.isAdmin) throw new ApiError(403, 'Admin only')
-
-    if (method === 'GET' && path === '/identities') {
-      const all = store.listIdentities()
-      sendJson(response, 200, all.map((item) => ({
-        id: item.id,
-        name: item.name,
-        isAdmin: item.isAdmin,
-        createdAt: item.createdAt,
-        revokedAt: item.revokedAt,
-        vaults: store.listVaultsForIdentity(item.id).map((vault) => ({ id: vault.id, name: vault.name })),
-      })), corsHeaders)
-      return
-    }
-
-    const identityMatch = path.match(/^\/identities\/(.+)$/)
-    if (method === 'DELETE' && identityMatch) {
-      const targetId = decodeURIComponent(identityMatch[1] ?? '')
-      store.revokeIdentity(targetId)
-      response.writeHead(204, corsHeaders)
-      response.end()
-      return
-    }
-
     throw new ApiError(404, 'Not found')
   }
 }
@@ -240,13 +220,19 @@ function requireAuth(
   store: KeyStore,
   request: IncomingMessage,
 ): { identityId: string; userName: string; vaultId: string } {
+  const identity = getAuthenticatedIdentity(store, request)
+  if (!identity) throw new ApiError(401, 'Authorization required')
+  return { identityId: identity.id, userName: identity.name, vaultId: '' }
+}
+
+function getAuthenticatedIdentity(store: KeyStore, request: IncomingMessage): Identity | null {
   const key = extractBearerToken(request.headers.authorization)
-  if (!key) throw new ApiError(401, 'Authorization required')
+  if (!key) return null
 
   try {
     const identity = store.getIdentityByKey(key)
     if (!identity || identity.revokedAt) throw new AuthError('invalid key')
-    return { identityId: identity.id, userName: identity.name, vaultId: '' }
+    return identity
   } catch (error) {
     if (error instanceof AuthError) throw new ApiError(401, error.message)
     throw error

@@ -5205,6 +5205,60 @@ function toVaultDocumentName(vaultId, documentId) {
   return `${INTERNAL_DOCUMENT_PREFIX}/${assertVaultId(vaultId)}/${Buffer.from(documentId, "utf8").toString("base64url")}`;
 }
 
+// ../core/dist/join-token.js
+function encodeJoinToken(input) {
+  const inviteCode = input.inviteCode.trim();
+  if (!inviteCode) {
+    throw new Error("Invite code is required");
+  }
+  const vaultId = assertVaultId(input.vaultId);
+  const serverUrl = normalizeServerUrl(input.serverUrl);
+  const parsed = new URL(serverUrl);
+  const token = new URL(`accord://${parsed.host}/${encodeURIComponent(vaultId)}`);
+  token.searchParams.set("invite", inviteCode);
+  if (parsed.protocol === "ws:") {
+    token.searchParams.set("tls", "0");
+  }
+  return token.toString();
+}
+function decodeJoinToken(value) {
+  const token = new URL(value);
+  if (token.protocol !== "accord:") {
+    throw new Error(`Invalid join token scheme "${token.protocol}"`);
+  }
+  if (!token.hostname) {
+    throw new Error("Join token host is required");
+  }
+  const vaultId = assertVaultId(decodeURIComponent(token.pathname.replace(/^\/+/, "")));
+  const inviteCode = token.searchParams.get("invite")?.trim();
+  if (!inviteCode) {
+    throw new Error("Join token invite code is required");
+  }
+  const tls = token.searchParams.get("tls");
+  if (tls !== null && tls !== "0" && tls !== "1") {
+    throw new Error(`Invalid tls flag "${tls}"`);
+  }
+  const serverUrl = `${tls === "0" ? "ws" : "wss"}://${token.host}`;
+  return {
+    serverUrl,
+    vaultId,
+    inviteCode
+  };
+}
+function normalizeServerUrl(value) {
+  const parsed = new URL(value);
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("Join tokens only support server origins without a path, query, or hash");
+  }
+  if (parsed.protocol === "http:" || parsed.protocol === "ws:") {
+    return `ws://${parsed.host}`;
+  }
+  if (parsed.protocol === "https:" || parsed.protocol === "wss:") {
+    return `wss://${parsed.host}`;
+  }
+  throw new Error(`Unsupported server URL scheme "${parsed.protocol}"`);
+}
+
 // ../../node_modules/.pnpm/lib0@0.2.117/node_modules/lib0/math.js
 var floor = Math.floor;
 var abs = Math.abs;
@@ -14046,10 +14100,9 @@ var DocPool = class {
     const syncTimer = setTimeout(() => {
       settleError(new Error(`Timed out syncing "${documentId}"`));
     }, this.syncTimeoutMs);
-    const vaultId = this.config.vaultId ?? "default";
     const provider = new HocuspocusProvider({
-      url: buildVaultWebSocketUrl(this.config.serverUrl, vaultId, this.config.userName),
-      name: toVaultDocumentName(vaultId, documentId),
+      url: buildVaultWebSocketUrl(this.config.serverUrl, this.config.vaultId, this.config.userName),
+      name: toVaultDocumentName(this.config.vaultId, documentId),
       document: ydoc,
       token: this.config.token,
       WebSocketPolyfill: wrapper_default,
@@ -16362,15 +16415,14 @@ var TextFileWatcher = class {
   constructor(config) {
     this.config = config;
     this.ignoreMatcher = createIgnoreMatcher(config.ignorePatterns);
-    const vaultId = config.vaultId ?? "default";
     this.docPool = new DocPool({
-      serverUrl: buildVaultWebSocketUrl2(config.serverUrl, vaultId, config.userName),
+      serverUrl: buildVaultWebSocketUrl2(config.serverUrl, config.vaultId, config.userName),
       token: config.token,
       userName: config.userName,
       syncTimeoutMs: config.syncTimeoutMs,
-      vaultId
+      vaultId: config.vaultId
     });
-    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, vaultId);
+    this.manifestUrl = buildVaultManifestUrl(config.serverUrl, config.vaultId);
   }
   async start() {
     this.watcher = esm_default.watch(this.config.root, {
@@ -16889,7 +16941,7 @@ var DEFAULT_SETTINGS = {
   serverUrl: "ws://localhost:1234",
   userName: "Obsidian",
   apiKey: "",
-  vaultId: "default",
+  vaultId: "",
   ignoredFolders: [],
   deletionBehavior: "trash"
 };
@@ -16925,6 +16977,87 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
     void this.restartWatcher();
   }
+  async redeemInvite(input, name) {
+    let serverUrl = this.settings.serverUrl.trim();
+    let code = input.trim();
+    if (code.startsWith("accord://")) {
+      const decoded = decodeJoinToken(code);
+      serverUrl = decoded.serverUrl;
+      code = decoded.inviteCode;
+      this.settings.serverUrl = decoded.serverUrl;
+      this.settings.vaultId = decoded.vaultId;
+    }
+    if (!serverUrl) {
+      throw new Error("Set the server URL first.");
+    }
+    const existingKey = this.settings.apiKey.trim();
+    const data = await this.requestJson(serverUrl, "/auth/redeem", {
+      method: "POST",
+      body: { code, name },
+      authKey: existingKey || void 0
+    });
+    if (!existingKey) {
+      this.settings.userName = name;
+    }
+    this.settings.serverUrl = serverUrl;
+    this.settings.apiKey = data.key;
+    this.settings.vaultId = data.vaultId;
+    await this.saveSettings();
+  }
+  async createVault(vaultName, userName) {
+    const serverUrl = this.settings.serverUrl.trim();
+    if (!serverUrl) {
+      throw new Error("Set the server URL first.");
+    }
+    const existingKey = this.settings.apiKey.trim();
+    const data = await this.requestJson(serverUrl, "/vaults", {
+      method: "POST",
+      body: { name: vaultName, userName },
+      authKey: existingKey || void 0
+    });
+    this.settings.serverUrl = serverUrl;
+    this.settings.userName = data.userName ?? userName;
+    this.settings.apiKey = data.key ?? existingKey;
+    this.settings.vaultId = data.vaultId;
+    await this.saveSettings();
+  }
+  async createInvite(ttlDays) {
+    this.assertConfigured();
+    const result = await this.requestJson(
+      this.settings.serverUrl,
+      `/vaults/${encodeURIComponent(this.settings.vaultId)}/invites`,
+      {
+        method: "POST",
+        body: ttlDays ? { ttlDays } : {},
+        authKey: this.settings.apiKey
+      }
+    );
+    return {
+      code: result.code,
+      createdBy: this.settings.userName,
+      expiresAt: result.expiresAt,
+      redeemedBy: null
+    };
+  }
+  async listInvites() {
+    this.assertConfigured();
+    return this.requestJson(
+      this.settings.serverUrl,
+      `/vaults/${encodeURIComponent(this.settings.vaultId)}/invites`,
+      {
+        method: "GET",
+        authKey: this.settings.apiKey
+      }
+    );
+  }
+  joinTokenForInvite(code) {
+    this.assertConfigured();
+    return encodeJoinToken({
+      serverUrl: this.settings.serverUrl,
+      vaultId: this.settings.vaultId,
+      inviteCode: code
+    });
+  }
   restartWatcher() {
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = setTimeout(() => {
@@ -16956,7 +17089,7 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
   }
   launchWatcher() {
     const vaultPath = this.getVaultPath();
-    if (!vaultPath || !this.settings.serverUrl) {
+    if (!vaultPath || !this.settings.serverUrl || !this.settings.vaultId) {
       this.setStatus("inactive");
       this.watcherPromise = Promise.resolve(null);
       return;
@@ -16967,7 +17100,7 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
       serverUrl: this.settings.serverUrl,
       userName: this.settings.userName,
       token: this.settings.apiKey || void 0,
-      vaultId: this.settings.vaultId || "default",
+      vaultId: this.settings.vaultId,
       deletionBehavior: this.settings.deletionBehavior,
       ignorePatterns: this.settings.ignoredFolders.map((folder) => `${folder.replace(/\/$/, "")}/`)
     }).then((watcher) => {
@@ -17004,36 +17137,116 @@ var AccordKitPlugin = class extends import_obsidian.Plugin {
     };
     this.statusBarItem.setText(labels[state]);
   }
+  async requestJson(serverUrl, route, options) {
+    const headers = {};
+    if (options.body !== void 0) {
+      headers["Content-Type"] = "application/json";
+    }
+    if (options.authKey) {
+      headers.Authorization = `Bearer ${options.authKey}`;
+    }
+    const response = await fetch(`${toHttpUrl(serverUrl)}${route}`, {
+      method: options.method,
+      headers,
+      body: options.body !== void 0 ? JSON.stringify(options.body) : void 0
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error ?? `HTTP ${response.status}`);
+    }
+    return data;
+  }
+  assertConfigured() {
+    if (!this.settings.serverUrl || !this.settings.vaultId) {
+      throw new Error("Configure a server URL and vault first.");
+    }
+  }
 };
 var RedeemModal = class extends import_obsidian.Modal {
   code = "";
-  name = "";
+  name;
   onRedeem;
-  constructor(app, onRedeem) {
+  constructor(app, initialName, onRedeem) {
     super(app);
+    this.name = initialName;
     this.onRedeem = onRedeem;
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Redeem invite code" });
-    new import_obsidian.Setting(contentEl).setName("Invite code").addText((text) => text.setPlaceholder("accord_inv_...").onChange((value) => {
-      this.code = value.trim();
-    }));
-    new import_obsidian.Setting(contentEl).setName("Identity name").setDesc('A label for this device, e.g. "My MacBook".').addText((text) => text.setPlaceholder("My MacBook").onChange((value) => {
-      this.name = value.trim();
-    }));
+    contentEl.createEl("h3", { text: "Join with invite" });
+    new import_obsidian.Setting(contentEl).setName("Invite").setDesc("Paste either a raw invite code or an accord:// join token.").addText(
+      (text) => text.setPlaceholder("accord://example.com/vault?invite=... or accord_inv_...").onChange((value) => {
+        this.code = value.trim();
+      })
+    );
+    new import_obsidian.Setting(contentEl).setName("Identity name").setDesc('A label for this device, e.g. "My MacBook".').addText(
+      (text) => text.setPlaceholder("My MacBook").setValue(this.name).onChange((value) => {
+        this.name = value.trim();
+      })
+    );
     new import_obsidian.Setting(contentEl).addButton(
-      (button) => button.setButtonText("Redeem").setCta().onClick(() => {
+      (button) => button.setButtonText("Join").setCta().onClick(async () => {
         if (!this.code) {
-          new import_obsidian.Notice("Invite code is required.");
+          new import_obsidian.Notice("Invite is required.");
           return;
         }
         if (!this.name) {
           new import_obsidian.Notice("Identity name is required.");
           return;
         }
-        this.onRedeem(this.code, this.name);
-        this.close();
+        try {
+          await this.onRedeem(this.code, this.name);
+          new import_obsidian.Notice("Vault access granted.");
+          this.close();
+        } catch (error) {
+          new import_obsidian.Notice(`Join failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      })
+    );
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+var CreateVaultModal = class extends import_obsidian.Modal {
+  onCreate;
+  vaultName = "";
+  userName;
+  constructor(app, initialUserName, onCreate) {
+    super(app);
+    this.userName = initialUserName;
+    this.onCreate = onCreate;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Create a new vault" });
+    new import_obsidian.Setting(contentEl).setName("Vault name").setDesc("A human-readable name for the vault.").addText(
+      (text) => text.setPlaceholder("My Vault").onChange((value) => {
+        this.vaultName = value.trim();
+      })
+    );
+    new import_obsidian.Setting(contentEl).setName("Identity name").setDesc("How this device appears to collaborators.").addText(
+      (text) => text.setPlaceholder("My MacBook").setValue(this.userName).onChange((value) => {
+        this.userName = value.trim();
+      })
+    );
+    new import_obsidian.Setting(contentEl).addButton(
+      (button) => button.setButtonText("Create").setCta().onClick(async () => {
+        if (!this.vaultName) {
+          new import_obsidian.Notice("Vault name is required.");
+          return;
+        }
+        if (!this.userName) {
+          new import_obsidian.Notice("Identity name is required.");
+          return;
+        }
+        try {
+          await this.onCreate(this.vaultName, this.userName);
+          new import_obsidian.Notice("Vault created and connected.");
+          this.close();
+        } catch (error) {
+          new import_obsidian.Notice(`Create failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       })
     );
   }
@@ -17056,6 +17269,34 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    const onboardingTitle = containerEl.createEl("h3", {
+      text: this.plugin.settings.vaultId ? "Vault access" : "Onboarding"
+    });
+    onboardingTitle.addClass("accord-kit-section-title");
+    new import_obsidian.Setting(containerEl).setName("Create a new vault").setDesc("Create your first vault or add another vault to this identity.").addButton(
+      (button) => button.setButtonText("Create vault\u2026").setCta().onClick(() => {
+        new CreateVaultModal(
+          this.app,
+          this.plugin.settings.userName,
+          async (vaultName, userName) => {
+            await this.plugin.createVault(vaultName, userName);
+            this.display();
+          }
+        ).open();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Join with an invite").setDesc("Redeem a vault invite code or join link.").addButton(
+      (button) => button.setButtonText("Join vault\u2026").onClick(() => {
+        new RedeemModal(
+          this.app,
+          this.plugin.settings.userName,
+          async (code, name) => {
+            await this.plugin.redeemInvite(code, name);
+            this.display();
+          }
+        ).open();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("API key").setDesc("Your accord_sk_... key. Leave empty for open mode.").addText((text) => {
       text.setPlaceholder("accord_sk_...").setValue(this.plugin.settings.apiKey).onChange(async (value) => {
         this.plugin.settings.apiKey = value.trim();
@@ -17063,53 +17304,16 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
       });
       text.inputEl.type = "password";
     });
-    new import_obsidian.Setting(containerEl).setName("Import invite code").setDesc("Redeem a vault invite and save the returned key locally.").addButton(
-      (button) => button.setButtonText("Redeem invite\u2026").onClick(() => {
-        new RedeemModal(this.app, async (code, name) => {
-          const serverUrl = this.plugin.settings.serverUrl;
-          if (!serverUrl) {
-            new import_obsidian.Notice("Set the server URL first.");
-            return;
-          }
-          const httpUrl = serverUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
-          const headers = { "Content-Type": "application/json" };
-          const existingKey = this.plugin.settings.apiKey.trim();
-          if (existingKey) {
-            headers.Authorization = `Bearer ${existingKey}`;
-          }
-          try {
-            const response = await fetch(`${httpUrl}/auth/redeem`, {
-              method: "POST",
-              headers,
-              body: JSON.stringify({ code, name })
-            });
-            const data = await response.json();
-            if (!response.ok || !data.key || !data.vaultId) {
-              throw new Error(data.error ?? `HTTP ${response.status}`);
-            }
-            if (!existingKey) {
-              this.plugin.settings.userName = name;
-            }
-            this.plugin.settings.apiKey = data.key;
-            this.plugin.settings.vaultId = data.vaultId;
-            await this.plugin.saveSettings();
-            new import_obsidian.Notice(`Vault access granted. Switched to ${data.vaultId}.`);
-          } catch (error) {
-            new import_obsidian.Notice(`Redeem failed: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }).open();
-      })
-    );
-    new import_obsidian.Setting(containerEl).setName("Vault ID").setDesc("Vault identifier to sync with. Invite redemption sets this automatically.").addText((text) => {
-      text.setPlaceholder("default").setValue(this.plugin.settings.vaultId).onChange(async (value) => {
+    new import_obsidian.Setting(containerEl).setName("Vault ID").setDesc("Vault identifier to sync with. Join and create flows set this automatically.").addText((text) => {
+      text.setPlaceholder("team-notes").setValue(this.plugin.settings.vaultId).onChange(async (value) => {
         const trimmed = value.trim();
-        if (trimmed && !/^[a-z0-9][a-z0-9\-_]{0,63}$/.test(trimmed)) {
+        if (trimmed && !isValidVaultId(trimmed)) {
           text.inputEl.setCustomValidity("Only lowercase letters, digits, hyphens, and underscores allowed.");
           text.inputEl.reportValidity();
           return;
         }
         text.inputEl.setCustomValidity("");
-        this.plugin.settings.vaultId = trimmed || "default";
+        this.plugin.settings.vaultId = trimmed;
         await this.plugin.saveSettings();
       });
       return text;
@@ -17120,6 +17324,9 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    if (this.plugin.settings.apiKey && this.plugin.settings.vaultId) {
+      this.renderInvitesSection(containerEl);
+    }
     new import_obsidian.Setting(containerEl).setName("Deletion behavior").setDesc("What happens to local files when a remote deletion is received.").addDropdown(
       (dropdown) => dropdown.addOption("trash", "Move to .accord-trash").addOption("delete", "Delete permanently").setValue(this.plugin.settings.deletionBehavior).onChange(async (value) => {
         this.plugin.settings.deletionBehavior = value;
@@ -17134,7 +17341,75 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
       text.inputEl.rows = 5;
     });
   }
+  renderInvitesSection(containerEl) {
+    containerEl.createEl("h3", { text: "Invites" });
+    const latestContainer = containerEl.createDiv();
+    const listContainer = containerEl.createDiv();
+    new import_obsidian.Setting(containerEl).setName("Generate invite").setDesc("Create a shareable accord:// join link for this vault.").addButton(
+      (button) => button.setButtonText("Generate invite").onClick(async () => {
+        try {
+          const invite = await this.plugin.createInvite();
+          this.renderLatestInvite(latestContainer, invite);
+          await this.renderInviteList(listContainer);
+        } catch (error) {
+          new import_obsidian.Notice(`Invite failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      })
+    );
+    void this.renderInviteList(listContainer);
+  }
+  renderLatestInvite(containerEl, invite) {
+    containerEl.empty();
+    const joinToken = this.plugin.joinTokenForInvite(invite.code);
+    containerEl.createEl("p", { text: `Latest invite expires ${invite.expiresAt}` });
+    new import_obsidian.Setting(containerEl).setName(joinToken).addButton(
+      (button) => button.setButtonText("Copy link").onClick(async () => {
+        await copyText(joinToken);
+        new import_obsidian.Notice("Join link copied.");
+      })
+    ).addButton(
+      (button) => button.setButtonText("Copy code").onClick(async () => {
+        await copyText(invite.code);
+        new import_obsidian.Notice("Invite code copied.");
+      })
+    );
+  }
+  async renderInviteList(containerEl) {
+    containerEl.empty();
+    try {
+      const invites = await this.plugin.listInvites();
+      if (invites.length === 0) {
+        containerEl.createEl("p", { text: "No invites." });
+        return;
+      }
+      for (const invite of invites) {
+        const joinToken = this.plugin.joinTokenForInvite(invite.code);
+        const status = invite.redeemedBy ? `Redeemed by ${invite.redeemedBy}${invite.redeemedAt ? ` on ${invite.redeemedAt}` : ""}` : `Expires ${invite.expiresAt}`;
+        new import_obsidian.Setting(containerEl).setName(invite.code).setDesc(status).addButton(
+          (button) => button.setButtonText("Copy link").onClick(async () => {
+            await copyText(joinToken);
+            new import_obsidian.Notice("Join link copied.");
+          })
+        ).addButton(
+          (button) => button.setButtonText("Copy code").onClick(async () => {
+            await copyText(invite.code);
+            new import_obsidian.Notice("Invite code copied.");
+          })
+        );
+      }
+    } catch (error) {
+      containerEl.createEl("p", {
+        text: `Could not load invites: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
 };
+function toHttpUrl(serverUrl) {
+  return serverUrl.replace(/^ws:\/\//, "http://").replace(/^wss:\/\//, "https://");
+}
+async function copyText(value) {
+  await navigator.clipboard.writeText(value);
+}
 /*! Bundled license information:
 
 chokidar/esm/index.js:

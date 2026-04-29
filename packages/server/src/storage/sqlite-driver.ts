@@ -46,7 +46,6 @@ export class SQLiteDriver implements StorageDriver {
       );
     `)
 
-    await this.createVault('default')
   }
 
   getDb(): any {

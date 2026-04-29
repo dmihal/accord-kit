@@ -24,7 +24,7 @@ export async function startTestWatcher(
     userName: options.userName ?? 'Test User',
     token: options.token,
     syncTimeoutMs: options.syncTimeoutMs,
-    vaultId: options.vault ?? options.vaultId ?? 'default',
+    vaultId: options.vault ?? options.vaultId ?? 'test-vault',
     manifestPollMs: options.manifestPollMs ?? 100,
     ignorePatterns: options.ignorePatterns,
     deletionBehavior: options.deletionBehavior,

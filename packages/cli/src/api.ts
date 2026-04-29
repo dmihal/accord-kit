@@ -41,8 +41,11 @@ export class ApiClient {
     return this.request('GET', '/auth/whoami')
   }
 
-  async createVault(name: string): Promise<{ vaultId: string; name: string }> {
-    return this.request('POST', '/vaults', { name })
+  async createVault(
+    name: string,
+    userName?: string,
+  ): Promise<{ vaultId: string; name: string; key?: string; identityId?: string; userName?: string }> {
+    return this.request('POST', '/vaults', userName ? { name, userName } : { name })
   }
 
   async createInvite(vaultId: string, ttlDays?: number): Promise<{ code: string; expiresAt: string }> {
@@ -59,18 +62,6 @@ export class ApiClient {
 
   async listMembers(vaultId: string): Promise<Array<{ identityId: string; name: string; grantedBy: string; grantedAt: string }>> {
     return this.request('GET', `/vaults/${vaultId}/members`)
-  }
-
-  async revokeMember(vaultId: string, identityId: string): Promise<void> {
-    return this.request('DELETE', `/vaults/${vaultId}/members/${encodeURIComponent(identityId)}`)
-  }
-
-  async listIdentities(): Promise<Array<{ id: string; name: string; isAdmin: boolean; createdAt: string; vaults: Array<{ id: string; name: string }> }>> {
-    return this.request('GET', '/identities')
-  }
-
-  async revokeIdentity(id: string): Promise<void> {
-    return this.request('DELETE', `/identities/${encodeURIComponent(id)}`)
   }
 }
 

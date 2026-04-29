@@ -3,7 +3,7 @@ import { assertVaultId, fromVaultDocumentName, isValidVaultId, toVaultDocumentNa
 
 describe('vault helpers', () => {
   it('validates vault IDs', () => {
-    expect(isValidVaultId('default')).toBe(true)
+    expect(isValidVaultId('alpha')).toBe(true)
     expect(isValidVaultId('team-foo')).toBe(true)
     expect(isValidVaultId('1')).toBe(true)
     expect(isValidVaultId('Bad')).toBe(false)

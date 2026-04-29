@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { Command } from 'commander'
-import { access, copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { startAccordWatcher } from './watcher.js'
 import { loadCredentials } from './credentials.js'
+import { installObsidianPlugin } from './obsidian.js'
 import { resolveOnChangePrefix } from './on-change.js'
 import { createAuthCommand } from './commands/auth.js'
+import { createJoinCommand } from './commands/join.js'
 import { createVaultCommand } from './commands/vault.js'
 import { createTokenCommand } from './commands/token.js'
 
@@ -19,7 +19,7 @@ program
   .description('Watch a local directory and sync with an AccordKit server')
   .option('-s, --server <url>', 'AccordKit server WebSocket URL')
   .option('-u, --user <name>', 'display name for this client')
-  .option('--vault <vault>', 'vault ID to sync with', 'default')
+  .option('--vault <vault>', 'vault ID to sync with')
   .option('--token <key>', 'API key (overrides credentials file)')
   .option('--delete', 'permanently delete files on remote deletion (default: move to .accord-trash)')
   .option('--ignore <patterns...>', 'additional ignore patterns')
@@ -29,7 +29,7 @@ program
   .action(async (dir: string, opts: {
     server?: string
     user?: string
-    vault: string
+    vault?: string
     token?: string
     delete?: boolean
     ignore?: string[]
@@ -48,11 +48,16 @@ program
         serverUrl ??= creds.serverUrl
         userName ??= creds.name
         key = creds.key
+        opts.vault ??= creds.activeVaultId
       }
     }
 
     serverUrl ??= 'ws://localhost:1234'
     userName ??= 'CLI'
+    if (!opts.vault) {
+      console.error('No vault selected. Pass --vault <vaultId> or join/select a vault first.')
+      process.exit(1)
+    }
     const onChangePrefix = await resolveOnChangePrefix({
       onChangePrefix: opts.onChangePrefix,
       onChangePrefixFile: opts.onChangePrefixFile,
@@ -85,47 +90,18 @@ program
   .command('install-plugin <vault>')
   .description('Install the AccordKit Obsidian plugin into a vault')
   .action(async (vaultPath: string) => {
-    const vault = path.resolve(vaultPath)
-
     try {
-      await access(vault)
-    } catch {
-      console.error(`Error: path does not exist: ${vault}`)
+      const install = await installObsidianPlugin(path.resolve(vaultPath))
+      console.log(`Plugin installed at ${install.pluginDir}`)
+      console.log('Restart Obsidian (or reload plugins) to activate AccordKit.')
+    } catch (error) {
+      console.error(`Error: ${error instanceof Error ? error.message : String(error)}`)
       process.exit(1)
     }
-
-    const obsidianDir = path.join(vault, '.obsidian')
-    try {
-      await access(obsidianDir)
-    } catch {
-      console.error(`Error: ${vault} does not look like an Obsidian vault (no .obsidian directory found)`)
-      process.exit(1)
-    }
-
-    const pluginDir = path.join(obsidianDir, 'plugins', 'accord-kit')
-    await mkdir(pluginDir, { recursive: true })
-
-    const pluginDistDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'plugin-dist')
-    await copyFile(path.join(pluginDistDir, 'main.js'), path.join(pluginDir, 'main.js'))
-    await copyFile(path.join(pluginDistDir, 'manifest.json'), path.join(pluginDir, 'manifest.json'))
-
-    const communityPluginsPath = path.join(obsidianDir, 'community-plugins.json')
-    let enabled: string[] = []
-    try {
-      enabled = JSON.parse(await readFile(communityPluginsPath, 'utf8')) as string[]
-    } catch {
-      // file absent on fresh vaults — start empty
-    }
-    if (!enabled.includes('accord-kit')) {
-      enabled.push('accord-kit')
-      await writeFile(communityPluginsPath, JSON.stringify(enabled, null, 2) + '\n', 'utf8')
-    }
-
-    console.log(`Plugin installed at ${pluginDir}`)
-    console.log('Restart Obsidian (or reload plugins) to activate AccordKit.')
   })
 
 program.addCommand(createAuthCommand())
+program.addCommand(createJoinCommand())
 program.addCommand(createVaultCommand())
 program.addCommand(createTokenCommand())
 

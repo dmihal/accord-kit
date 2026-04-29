@@ -1,21 +1,25 @@
 # AccordKit Multi-Vault
 
-This document describes the multi-vault behavior that exists on the current branch. It is not the older JWT/Postgres rollout plan.
+This document describes the multi-vault behavior implemented on the current
+branch.
 
 ## Current Scope
 
-AccordKit now supports multiple vaults on one server process.
+AccordKit supports multiple explicit vaults on one server process.
 
 - Documents are isolated by vault.
 - Invite redemption is vault-scoped.
 - A single identity can belong to multiple vaults.
-- The CLI watcher and Obsidian plugin both sync against a specific vault.
+- The CLI watcher and Obsidian plugin both sync against one selected vault at a
+  time.
+- There is no implicit `default` vault.
 
 The same relative document path can exist in multiple vaults without collision.
 
 ## Auth Modes
 
-The server currently supports three auth modes in `packages/server/src/config.ts`:
+The server currently supports three auth modes in
+`packages/server/src/config.ts`:
 
 - `open`
 - `key`
@@ -26,25 +30,31 @@ The server currently supports three auth modes in `packages/server/src/config.ts
 Development mode.
 
 - No application-level key is required.
-- Clients connect to vault-scoped URLs such as `ws://host:1234/vaults/default?user=Alice`.
-- The server synthesizes a user identity from the `user` query param or falls back to `anon`.
+- Clients still connect to explicit vault URLs such as
+  `ws://host:1234/vaults/team-notes?user=Alice`.
+- The server synthesizes a user identity from the `user` query param or falls
+  back to `anon`.
 
 ### `key`
 
-This is the implemented multi-vault onboarding flow.
+This is the implemented onboarding flow.
 
-- `accord-server init` bootstraps the SQLite DB, creates the `default` vault, and prints an admin key.
+- There is no bootstrap admin key.
+- There is no server-wide admin role.
+- The first user creates a vault directly from the client.
 - Clients authenticate with `accord_sk_...` keys.
 - New devices join vaults through invite redemption.
-- Redeeming an invite with an existing bearer key adds vault access to that existing identity instead of creating a new identity.
+- Redeeming an invite with an existing bearer key adds vault access to the
+  existing identity instead of creating a new identity.
 
 This logic lives in:
 
-- `packages/server/src/bin/init.ts`
 - `packages/server/src/routes.ts`
 - `packages/server/src/auth/key.ts`
+- `packages/server/src/auth/key-store.ts`
 
-`key` mode currently requires SQLite storage, because the identity and invite store is SQLite-backed in `packages/server/src/server.ts`.
+`key` mode currently requires SQLite storage because the identity and invite
+store is SQLite-backed in `packages/server/src/server.ts`.
 
 ### `jwt`
 
@@ -54,20 +64,25 @@ JWT mode exists and enforces vault membership from token claims.
 - `GET /vaults` works.
 - `GET /vaults/:vaultId/documents` works.
 
-JWT mode does not currently expose the invite/identity management flow. Those REST endpoints are only mounted in `key` mode.
+JWT mode does not expose the invite/identity onboarding flow. Those REST
+endpoints are only mounted in `key` mode.
 
 ## Connection Model
 
 Watcher and plugin clients sync through vault-scoped WebSocket URLs.
 
-- The watcher builds URLs like `/vaults/<vaultId>?user=<name>` in `packages/cli/src/watcher.ts`.
-- The plugin passes the selected `vaultId` into the watcher in `packages/obsidian-plugin/src/main.ts`.
+- The watcher builds URLs like `/vaults/<vaultId>?user=<name>` in
+  `packages/cli/src/watcher.ts`.
+- The plugin passes the selected `vaultId` into the watcher in
+  `packages/obsidian-plugin/src/main.ts`.
 
-The server stores `vaultId` in connection context during authentication in `packages/server/src/auth/index.ts`.
+The server stores `vaultId` in connection context during authentication in
+`packages/server/src/auth/index.ts`.
 
 ## Document Storage Model
 
-Documents are stored per vault through the storage driver abstraction in `packages/server/src/storage/index.ts`.
+Documents are stored per vault through the storage driver abstraction in
+`packages/server/src/storage/index.ts`.
 
 Current backends:
 
@@ -79,7 +94,8 @@ Each storage operation is keyed by:
 - `vaultId`
 - `documentId`
 
-The client encodes document names with vault context using core helpers, and the server decodes them when needed.
+The client encodes document names with vault context using core helpers, and
+the server decodes them when needed.
 
 This gives isolation for:
 
@@ -94,8 +110,6 @@ This gives isolation for:
 - `GET /vaults`
 - `GET /vaults/<vaultId>/documents`
 
-See `packages/server/src/routes.ts`.
-
 ### Routes active in `key` mode
 
 - `POST /auth/redeem`
@@ -105,11 +119,6 @@ See `packages/server/src/routes.ts`.
 - `GET /vaults/<vaultId>/invites`
 - `DELETE /vaults/<vaultId>/invites/<code>`
 - `GET /vaults/<vaultId>/members`
-- `DELETE /vaults/<vaultId>/members/<identityId>`
-- `GET /identities`
-- `DELETE /identities/<identityId>`
-
-These are implemented in `packages/server/src/routes.ts`.
 
 ## Invite Model
 
@@ -120,19 +129,32 @@ The flow is:
 1. A member with access to a vault creates an invite for that vault.
 2. Another device redeems the invite.
 3. If the device has no identity yet, a new identity and key are created.
-4. If the device already has a key, the vault is added to that existing identity.
+4. If the device already has a key, the vault is added to that existing
+   identity.
 
-Relevant client/server code:
+The bundled join-token format is:
 
-- `packages/cli/src/api.ts`
-- `packages/cli/src/commands/token.ts`
+```text
+accord://<host>[:<port>]/<vaultId>?invite=<code>[&tls=0]
+```
+
+Relevant code:
+
+- `packages/core/src/join-token.ts`
+- `packages/cli/src/commands/join.ts`
 - `packages/server/src/routes.ts`
 
 ## CLI Behavior
 
 ### `accord watch`
 
-`accord watch` is vault-scoped and should be pointed at the vault ID you want to sync.
+`accord watch` is vault-scoped.
+
+It resolves the vault in this order:
+
+1. `--vault`
+2. saved client-local `activeVaultId`
+3. otherwise error
 
 Example:
 
@@ -140,61 +162,60 @@ Example:
 accord watch ./notes --server ws://localhost:1234 --vault <vault-id>
 ```
 
-See `packages/cli/src/cli.ts`.
-
 ### Vault management commands
 
-Vault management commands accept either a vault name or a vault ID and resolve names through `whoami`.
+Vault management commands accept either a vault name or a vault ID and resolve
+names through `whoami`.
 
-See `packages/cli/src/commands/vault.ts`.
-
-### Login behavior
+### Login and join behavior
 
 `accord auth login` supports both:
 
 - vault invite codes: `accord_inv_...`
-- direct admin keys: `accord_sk_...`
+- direct keys: `accord_sk_...`
 
-See `packages/cli/src/commands/auth.ts`.
+`accord join` accepts the bundled `accord://...` format and optionally
+scaffolds an Obsidian vault.
 
 ## Obsidian Plugin Behavior
 
-The plugin currently uses:
+The plugin stores:
 
 - `serverUrl`
 - `apiKey`
 - `vaultId`
 - `userName`
 
-See `packages/obsidian-plugin/src/main.ts`.
+When it has no `vaultId`, it stays in an unconfigured onboarding state. The
+settings UI offers:
 
-It also supports redeeming vault invites directly from settings:
+- **Create a new vault**
+- **Join with an invite**
 
-- If there is no existing key, the redeemed key is saved.
-- If there is an existing key, the redeem request includes it as a bearer token so the new vault is attached to the current identity.
-- After redeem, the plugin switches its saved `vaultId` to the invited vault automatically.
+The watcher does not start until both `serverUrl` and `vaultId` are configured.
 
-See `packages/obsidian-plugin/src/main.ts`.
+Once configured, the plugin also exposes invite generation and listing in the
+settings tab.
 
 ## Current Limits
 
-These items are not fully implemented as part of the current branch:
+These items are not implemented as part of the current branch:
 
-- the older Redis clustering plan
-- `accord-server migrate`
+- Redis clustering
 - binary REST endpoints
-- admin vault-create/delete endpoints outside the key-mode identity API
 - a Postgres-backed identity/invite store for `auth.mode=key`
+- vault-level roles such as owner/admin/member
+- member-removal APIs
 
-Postgres exists today as a document storage backend, but the invite/identity flow is still SQLite-backed and tied to `key` mode.
+Postgres exists today as a document storage backend, but the invite/identity
+flow is still SQLite-backed and tied to `key` mode.
 
 ## Summary
 
 The current multi-vault implementation is centered on:
 
-- vault-scoped document storage
-- vault-scoped invite redemption
+- explicit vault-scoped document storage
+- explicit vault-scoped invite redemption
 - one identity gaining access to many vaults
 - watcher/plugin clients syncing one selected vault at a time
-
-If a future JWT/Postgres/Redis rollout plan is needed again, it should live in a separate design doc so it does not get confused with the implemented behavior.
+- no special `default` vault and no server-wide admin role

@@ -67,7 +67,7 @@ export async function startTestServer(options: StartTestServerOptions = {}): Pro
   })
 
   await server.listen()
-  for (const vaultId of options.vaults ?? ['default']) {
+  for (const vaultId of options.vaults ?? ['test-vault']) {
     await server.accord.storage.createVault(vaultId)
   }
 
@@ -83,9 +83,9 @@ export async function startTestServer(options: StartTestServerOptions = {}): Pro
 
 export interface AuthTestServer extends TestServer {
   store: KeyStore
-  adminKey: string
-  adminId: string
-  defaultVaultId: string
+  userKey: string
+  userId: string
+  vaultId: string
   tmpDir: string
 }
 
@@ -103,12 +103,10 @@ export async function startAuthTestServer(): Promise<AuthTestServer> {
 
   const store = new KeyStore(db)
 
-  // Bootstrap: default vault + admin identity
-  const adminKey = generateKey()
-  const defaultVault = store.createVault('default', null)
-  const adminIdentity = store.createIdentity('admin', adminKey, true)
-  db.prepare('UPDATE vaults SET created_by = ? WHERE id = ?').run(adminIdentity.id, defaultVault.id)
-  store.grantVaultAccess(adminIdentity.id, defaultVault.id, adminIdentity.id)
+  const userKey = generateKey()
+  const userIdentity = store.createIdentity('owner', userKey)
+  const primaryVault = store.createVault('starter', userIdentity.id)
+  store.grantVaultAccess(userIdentity.id, primaryVault.id, userIdentity.id)
 
   db.close()
 
@@ -145,9 +143,9 @@ export async function startAuthTestServer(): Promise<AuthTestServer> {
     wsUrl: server.webSocketURL,
     httpUrl: server.httpURL,
     store: testStore,
-    adminKey,
-    adminId: adminIdentity.id,
-    defaultVaultId: defaultVault.id,
+    userKey,
+    userId: userIdentity.id,
+    vaultId: primaryVault.id,
     tmpDir,
     stop: async () => {
       testDb.close()

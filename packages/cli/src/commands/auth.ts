@@ -37,7 +37,7 @@ export function createAuthCommand(): Command {
         const code = opts.invite ?? (await rl.question('Invite code: ')).trim()
 
         if (code.startsWith('accord_sk_')) {
-          // Direct key (e.g. the admin key from `accord-server init`)
+          // Direct key login for users who already have a saved key.
           const client = new ApiClient(serverUrl, code)
           const info = await client.whoami()
           await saveCredentials({
@@ -45,6 +45,7 @@ export function createAuthCommand(): Command {
             identityId: info.identityId,
             name: info.name,
             key: code,
+            activeVaultId: existing?.activeVaultId ?? info.vaults[0]?.id,
           })
           console.log(`Logged in as ${info.name} (${info.identityId})`)
           console.log(`Vaults: ${info.vaults.map(v => v.name).join(', ') || '(none)'}`)
@@ -59,6 +60,7 @@ export function createAuthCommand(): Command {
             identityId: result.identityId,
             name,
             key: result.key,
+            activeVaultId: result.vaultId,
           })
 
           console.log(`Logged in. Identity ID: ${result.identityId}`)

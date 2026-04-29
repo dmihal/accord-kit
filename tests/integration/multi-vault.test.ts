@@ -10,7 +10,7 @@ describe('multi-vault isolation', () => {
 
   beforeEach(async () => {
     server = await startTestServer({
-      vaults: ['default', 'team-a', 'team-b'],
+      vaults: ['team-main', 'team-a', 'team-b'],
     })
     vaultA = await startTestWatcher(server.wsUrl, { vault: 'team-a', userName: 'Agent A' })
     vaultB = await startTestWatcher(server.wsUrl, { vault: 'team-b', userName: 'Agent B' })
