@@ -63,7 +63,7 @@ export function defaultServerConfig(): AccordServerConfig {
     address: DEFAULT_SERVER_ADDRESS,
     port: DEFAULT_SERVER_PORT,
     auth: {
-      mode: 'open',
+      mode: 'key',
       jwt: {
         publicKeys: [],
       },

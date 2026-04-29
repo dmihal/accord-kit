@@ -58,7 +58,7 @@ saves it after verifying `whoami`.
 
 #### `accord auth status`
 
-Show the active server, identity, and accessible vaults.
+Show the active server, identity, API key, and accessible vaults.
 
 ```bash
 accord auth status
@@ -80,7 +80,7 @@ This removes local credentials only; it does not revoke the key on the server.
 
 Create vaults, issue invites, and inspect membership.
 
-#### `accord vault create <name>`
+#### `accord vault create <name> [path]`
 
 Create a vault.
 
@@ -88,10 +88,14 @@ Create a vault.
   identity.
 - If no credentials exist yet, pass `--server` and `--user` to bootstrap the
   first identity and first vault.
+- If `path` is provided, the AccordKit Obsidian plugin is installed into that
+  folder and pre-configured with the server URL, API key, and vault ID — so
+  opening the folder in Obsidian is all that's needed to start syncing.
 
 ```bash
 accord vault create team-notes
 accord vault create team-notes --server ws://localhost:1234 --user "David's laptop"
+accord vault create team-notes ~/Documents/MyVault --server ws://localhost:1234 --user "David's laptop"
 ```
 
 #### `accord vault list`

@@ -14,14 +14,18 @@ export async function startServerFromCli(argv = process.argv): Promise<void> {
     .option('-c, --config <path>', 'path to a JSON or YAML config file')
     .option('--address <address>', 'address to bind')
     .option('-p, --port <port>', 'port to bind')
+    .option('--open', 'run in open auth mode (no API keys required)')
+    .option('--key', 'run in key auth mode (require API keys)')
     .option('-v, --verbose', 'log every document event')
-    .action(async (opts: { config?: string; address?: string; port?: string; verbose?: boolean }) => {
+    .action(async (opts: { config?: string; address?: string; port?: string; open?: boolean; key?: boolean; verbose?: boolean }) => {
       const config = await loadServerConfig({
         configPath: opts.config,
         env: {
           ...process.env,
           ...(opts.address ? { ACCORD_ADDRESS: opts.address } : {}),
           ...(opts.port ? { ACCORD_PORT: opts.port } : {}),
+          ...(opts.open ? { ACCORD_AUTH_MODE: 'open' } : {}),
+          ...(opts.key ? { ACCORD_AUTH_MODE: 'key' } : {}),
         },
       })
       if (opts.verbose) config.verbose = true

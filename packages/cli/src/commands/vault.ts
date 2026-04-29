@@ -1,7 +1,9 @@
+import path from 'node:path'
 import { Command } from 'commander'
 import { encodeJoinToken } from '@accord-kit/core'
 import { ApiClient } from '../api.js'
 import { loadCredentials, saveCredentials } from '../credentials.js'
+import { installObsidianPlugin } from '../obsidian.js'
 
 async function getClient(serverOpt?: string): Promise<{ client: ApiClient; serverUrl: string }> {
   const creds = await loadCredentials(serverOpt)
@@ -28,11 +30,11 @@ export function createVaultCommand(): Command {
   const vault = new Command('vault').description('Manage vaults')
 
   vault
-    .command('create <name>')
+    .command('create <name> [path]')
     .description('Create a new vault (you get access automatically)')
     .option('-s, --server <url>', 'server URL for first-time setup or override')
     .option('-u, --user <name>', 'identity name when creating your first vault')
-    .action(async (name: string, opts: { server?: string; user?: string }) => {
+    .action(async (name: string, vaultPath: string | undefined, opts: { server?: string; user?: string }) => {
       const existing = await loadCredentials(opts.server)
       if (existing) {
         const client = new ApiClient(existing.serverUrl, existing.key)
@@ -42,6 +44,20 @@ export function createVaultCommand(): Command {
           activeVaultId: result.vaultId,
         })
         console.log(`Created vault "${result.name}" (${result.vaultId})`)
+        if (vaultPath) {
+          const install = await installObsidianPlugin(path.resolve(vaultPath), {
+            scaffoldIfMissing: true,
+            settings: {
+              serverUrl: existing.serverUrl,
+              apiKey: existing.key,
+              vaultId: result.vaultId,
+              userName: existing.name,
+            },
+          })
+          console.log(`Plugin installed at ${install.pluginDir}`)
+          if (install.scaffoldedVault) console.log('Scaffolded a new Obsidian vault.')
+          console.log('Open the folder in Obsidian to start syncing.')
+        }
         return
       }
 
@@ -69,6 +85,20 @@ export function createVaultCommand(): Command {
       })
       console.log(`Created vault "${result.name}" (${result.vaultId})`)
       console.log(`Logged in as ${result.userName} (${result.identityId})`)
+      if (vaultPath) {
+        const install = await installObsidianPlugin(path.resolve(vaultPath), {
+          scaffoldIfMissing: true,
+          settings: {
+            serverUrl: opts.server,
+            apiKey: result.key,
+            vaultId: result.vaultId,
+            userName: result.userName,
+          },
+        })
+        console.log(`Plugin installed at ${install.pluginDir}`)
+        if (install.scaffoldedVault) console.log('Scaffolded a new Obsidian vault.')
+        console.log('Open the folder in Obsidian to start syncing.')
+      }
     })
 
   vault

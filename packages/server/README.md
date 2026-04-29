@@ -30,6 +30,8 @@ Options:
   -c, --config <path>    Path to a JSON or YAML config file
   --address <address>    Address to bind
   -p, --port <port>      Port to bind
+  --key                  Run in key auth mode (require API keys)
+  --open                 Run in open auth mode (no API keys required)
   -v, --verbose          Log every document event
 ```
 
@@ -45,7 +47,7 @@ Create `accord-server.yaml` (or `.json`) next to the database:
 address: 127.0.0.1
 port: 1234
 auth:
-  mode: open
+  mode: key
   jwt:
     publicKeys: []
 storage:

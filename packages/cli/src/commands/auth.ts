@@ -84,6 +84,7 @@ export function createAuthCommand(): Command {
 
       console.log(`Server:   ${creds.serverUrl}`)
       console.log(`Identity: ${creds.name} (${creds.identityId})`)
+      console.log(`Key:      ${creds.key}`)
 
       const client = new ApiClient(creds.serverUrl, creds.key)
       try {
