@@ -17100,12 +17100,20 @@ var AccordKitSettingTab = class extends import_obsidian.PluginSettingTab {
         }).open();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Vault ID").setDesc("Vault identifier to sync with. Invite redemption sets this automatically.").addText(
-      (text) => text.setPlaceholder("default").setValue(this.plugin.settings.vaultId).onChange(async (value) => {
-        this.plugin.settings.vaultId = value.trim() || "default";
+    new import_obsidian.Setting(containerEl).setName("Vault ID").setDesc("Vault identifier to sync with. Invite redemption sets this automatically.").addText((text) => {
+      text.setPlaceholder("default").setValue(this.plugin.settings.vaultId).onChange(async (value) => {
+        const trimmed = value.trim();
+        if (trimmed && !/^[a-z0-9][a-z0-9\-_]{0,63}$/.test(trimmed)) {
+          text.inputEl.setCustomValidity("Only lowercase letters, digits, hyphens, and underscores allowed.");
+          text.inputEl.reportValidity();
+          return;
+        }
+        text.inputEl.setCustomValidity("");
+        this.plugin.settings.vaultId = trimmed || "default";
         await this.plugin.saveSettings();
-      })
-    );
+      });
+      return text;
+    });
     new import_obsidian.Setting(containerEl).setName("User name").setDesc("Your name as displayed in collaborative editing sessions.").addText(
       (text) => text.setPlaceholder("Obsidian").setValue(this.plugin.settings.userName).onChange(async (value) => {
         this.plugin.settings.userName = value.trim();
