@@ -15,7 +15,7 @@ export interface TestWatcher {
 
 export async function startTestWatcher(
   serverUrl: string,
-  options: Partial<WatcherConfig> = {},
+  options: (Partial<WatcherConfig> & { vault?: string }) = {},
 ): Promise<TestWatcher> {
   const root = options.root ?? (await mkdtemp(path.join(tmpdir(), 'accord-watcher-')))
   const watcher: AccordWatcher = await startAccordWatcher({
@@ -23,7 +23,8 @@ export async function startTestWatcher(
     serverUrl,
     userName: options.userName ?? 'Test User',
     token: options.token,
-    vaultId: options.vaultId,
+    syncTimeoutMs: options.syncTimeoutMs,
+    vaultId: options.vault ?? options.vaultId ?? 'test-vault',
     manifestPollMs: options.manifestPollMs ?? 100,
     ignorePatterns: options.ignorePatterns,
     deletionBehavior: options.deletionBehavior,

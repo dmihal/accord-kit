@@ -1,4 +1,4 @@
-import { applyFileContent } from '@accord-kit/core'
+import { applyFileContent, toVaultDocumentName } from '@accord-kit/core'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import NodeWebSocket from 'ws'
 import * as Y from 'yjs'
@@ -15,8 +15,8 @@ export function stringToColor(str: string): string {
 export interface DocPoolConfig {
   serverUrl: string
   userName: string
+  vaultId: string
   token?: string
-  vaultId?: string
   syncTimeoutMs?: number
 }
 
@@ -74,13 +74,9 @@ export class DocPool {
       settleError(new Error(`Timed out syncing "${documentId}"`))
     }, this.syncTimeoutMs)
 
-    const wsUrl = this.config.vaultId
-      ? `${this.config.serverUrl}?vault=${encodeURIComponent(this.config.vaultId)}`
-      : this.config.serverUrl
-
     const provider = new HocuspocusProvider({
-      url: wsUrl,
-      name: documentId,
+      url: buildVaultWebSocketUrl(this.config.serverUrl, this.config.vaultId, this.config.userName),
+      name: toVaultDocumentName(this.config.vaultId, documentId),
       document: ydoc,
       token: this.config.token,
       WebSocketPolyfill: NodeWebSocket as unknown as typeof WebSocket,
@@ -151,4 +147,11 @@ export class DocPool {
       this.close(documentId)
     }
   }
+}
+
+function buildVaultWebSocketUrl(baseUrl: string, vaultId: string, userName: string): string {
+  const url = new URL(baseUrl)
+  url.pathname = `/vaults/${encodeURIComponent(vaultId)}`
+  url.searchParams.set('user', userName)
+  return url.toString()
 }

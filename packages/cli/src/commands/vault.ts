@@ -1,16 +1,15 @@
 import { Command } from 'commander'
-import * as readline from 'node:readline/promises'
-import { stdin as input, stdout as output } from 'node:process'
+import { encodeJoinToken } from '@accord-kit/core'
 import { ApiClient } from '../api.js'
-import { loadCredentials } from '../credentials.js'
+import { loadCredentials, saveCredentials } from '../credentials.js'
 
-async function getClient(serverOpt?: string): Promise<{ client: ApiClient; vaultId?: string }> {
+async function getClient(serverOpt?: string): Promise<{ client: ApiClient; serverUrl: string }> {
   const creds = await loadCredentials(serverOpt)
   if (!creds) {
     console.error('Not logged in. Run: accord auth login <serverUrl>')
     process.exit(1)
   }
-  return { client: new ApiClient(creds.serverUrl, creds.key) }
+  return { client: new ApiClient(creds.serverUrl, creds.key), serverUrl: creds.serverUrl }
 }
 
 async function resolveVaultId(client: ApiClient, nameOrId: string): Promise<string> {
@@ -31,10 +30,45 @@ export function createVaultCommand(): Command {
   vault
     .command('create <name>')
     .description('Create a new vault (you get access automatically)')
-    .action(async (name: string) => {
-      const { client } = await getClient()
-      const result = await client.createVault(name)
+    .option('-s, --server <url>', 'server URL for first-time setup or override')
+    .option('-u, --user <name>', 'identity name when creating your first vault')
+    .action(async (name: string, opts: { server?: string; user?: string }) => {
+      const existing = await loadCredentials(opts.server)
+      if (existing) {
+        const client = new ApiClient(existing.serverUrl, existing.key)
+        const result = await client.createVault(name)
+        await saveCredentials({
+          ...existing,
+          activeVaultId: result.vaultId,
+        })
+        console.log(`Created vault "${result.name}" (${result.vaultId})`)
+        return
+      }
+
+      if (!opts.server) {
+        console.error('No server URL. Pass --server <url> to create your first vault.')
+        process.exit(1)
+      }
+      if (!opts.user?.trim()) {
+        console.error('No user name. Pass --user <name> to create your first vault.')
+        process.exit(1)
+      }
+
+      const client = new ApiClient(opts.server)
+      const result = await client.createVault(name, opts.user.trim())
+      if (!result.key || !result.identityId || !result.userName) {
+        throw new Error('Server did not return bootstrap credentials')
+      }
+
+      await saveCredentials({
+        serverUrl: opts.server,
+        identityId: result.identityId,
+        name: result.userName,
+        key: result.key,
+        activeVaultId: result.vaultId,
+      })
       console.log(`Created vault "${result.name}" (${result.vaultId})`)
+      console.log(`Logged in as ${result.userName} (${result.identityId})`)
     })
 
   vault
@@ -57,11 +91,20 @@ export function createVaultCommand(): Command {
     .description('Generate a single-use invite code for a vault')
     .option('--ttl <days>', 'TTL in days', '7')
     .action(async (vaultArg: string, opts: { ttl: string }) => {
-      const { client } = await getClient()
+      const { client, serverUrl } = await getClient()
       const vaultId = await resolveVaultId(client, vaultArg)
       const ttlDays = parseInt(opts.ttl, 10) || 7
       const result = await client.createInvite(vaultId, ttlDays)
-      console.log(`Invite code (expires ${result.expiresAt}):`)
+      const joinToken = encodeJoinToken({
+        serverUrl,
+        vaultId,
+        inviteCode: result.code,
+      })
+      console.log(`Join token (expires ${result.expiresAt}):`)
+      console.log()
+      console.log(`  ${joinToken}`)
+      console.log()
+      console.log('Raw invite code:')
       console.log()
       console.log(`  ${result.code}`)
     })
@@ -97,31 +140,6 @@ export function createVaultCommand(): Command {
           console.log(`${m.name}  ${m.identityId}  (granted ${m.grantedAt})`)
         }
       }
-    })
-
-  vault
-    .command('revoke <vault> <identityId>')
-    .description("Revoke an identity's access to a vault")
-    .option('-y, --yes', 'skip confirmation')
-    .action(async (vaultArg: string, identityId: string, opts: { yes?: boolean }) => {
-      const { client } = await getClient()
-      const vaultId = await resolveVaultId(client, vaultArg)
-
-      if (!opts.yes) {
-        const rl = readline.createInterface({ input, output })
-        try {
-          const answer = await rl.question(`Revoke ${identityId} from vault ${vaultArg}? [y/N] `)
-          if (answer.trim().toLowerCase() !== 'y') {
-            console.log('Aborted.')
-            return
-          }
-        } finally {
-          rl.close()
-        }
-      }
-
-      await client.revokeMember(vaultId, identityId)
-      console.log('Access revoked.')
     })
 
   return vault

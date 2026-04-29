@@ -17,8 +17,7 @@ export function createKeyVerifier(store: KeyStore) {
   return {
     /**
      * Authenticate a raw key against a vault.
-     * `vaultNameOrId` can be either the vault name (e.g. "default") or the
-     * vault UUID — the server resolves name→ID transparently.
+     * `vaultNameOrId` can be either the vault name or the vault ID.
      */
     authenticate(rawKey: string, vaultNameOrId: string): AuthContext {
       const identity = store.getIdentityByKey(rawKey)
@@ -39,4 +38,3 @@ export function createKeyVerifier(store: KeyStore) {
     },
   }
 }
-

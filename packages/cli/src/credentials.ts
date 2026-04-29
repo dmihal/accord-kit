@@ -7,6 +7,7 @@ export interface Credentials {
   identityId: string
   name: string
   key: string
+  activeVaultId?: string
 }
 
 function credentialsPath(serverUrl?: string): string {

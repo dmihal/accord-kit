@@ -6,7 +6,7 @@ import {
   defaultServerConfig,
   isLoopbackAddress,
   loadServerConfig,
-  shouldWarnForUnauthenticatedBind,
+  shouldWarnForOpenBind,
 } from '../config.js'
 
 describe('server config', () => {
@@ -14,12 +14,21 @@ describe('server config', () => {
     expect(defaultServerConfig()).toEqual({
       address: '127.0.0.1',
       port: 1234,
-      auth: { mode: 'open' },
-      persistence: {
-        path: './data.db',
+      auth: {
+        mode: 'open',
+        jwt: {
+          publicKeys: [],
+        },
       },
-      binary: {
-        storageDir: './binary',
+      storage: {
+        driver: 'sqlite',
+        sqlite: {
+          path: './data.db',
+        },
+        postgres: {
+          url: '',
+          poolSize: 10,
+        },
       },
       quiet: false,
       verbose: false,
@@ -34,10 +43,15 @@ describe('server config', () => {
       [
         'address: 127.0.0.2',
         'port: 4321',
-        'persistence:',
-        '  path: ./custom.db',
-        'binary:',
-        '  storageDir: ./files',
+        'auth:',
+        '  mode: jwt',
+        '  jwt:',
+        '    issuer: accord-kit',
+        '    publicKeys: []',
+        'storage:',
+        '  driver: sqlite',
+        '  sqlite:',
+        '    path: ./custom.db',
         'quiet: true',
       ].join('\n'),
     )
@@ -45,12 +59,23 @@ describe('server config', () => {
     await expect(loadServerConfig({ configPath, env: {} })).resolves.toEqual({
       address: '127.0.0.2',
       port: 4321,
-      auth: { mode: 'open' },
-      persistence: {
-        path: './custom.db',
+      auth: {
+        mode: 'jwt',
+        jwt: {
+          issuer: 'accord-kit',
+          audience: undefined,
+          publicKeys: [],
+        },
       },
-      binary: {
-        storageDir: './files',
+      storage: {
+        driver: 'sqlite',
+        sqlite: {
+          path: './custom.db',
+        },
+        postgres: {
+          url: '',
+          poolSize: 10,
+        },
       },
       quiet: true,
       verbose: false,
@@ -68,18 +93,24 @@ describe('server config', () => {
         env: {
           ACCORD_ADDRESS: '127.0.0.3',
           ACCORD_PORT: '5555',
-          ACCORD_DB_PATH: './env.db',
-          ACCORD_BINARY_DIR: './env-binary',
+          ACCORD_STORAGE_DRIVER: 'postgres',
+          ACCORD_PG_URL: 'postgres://localhost:5432/accord',
+          ACCORD_PG_POOL_SIZE: '15',
+          ACCORD_AUTH_MODE: 'key',
         },
       }),
     ).resolves.toMatchObject({
       address: '127.0.0.3',
       port: 5555,
-      persistence: {
-        path: './env.db',
+      auth: {
+        mode: 'key',
       },
-      binary: {
-        storageDir: './env-binary',
+      storage: {
+        driver: 'postgres',
+        postgres: {
+          url: 'postgres://localhost:5432/accord',
+          poolSize: 15,
+        },
       },
     })
   })
@@ -93,8 +124,32 @@ describe('server config', () => {
     expect(isLoopbackAddress('127.0.0.1')).toBe(true)
     expect(isLoopbackAddress('localhost')).toBe(true)
     expect(isLoopbackAddress('::1')).toBe(true)
-    expect(shouldWarnForUnauthenticatedBind('127.0.0.1')).toBe(false)
-    expect(shouldWarnForUnauthenticatedBind('100.64.0.1')).toBe(true)
-    expect(shouldWarnForUnauthenticatedBind('0.0.0.0')).toBe(true)
+    expect(shouldWarnForOpenBind(defaultServerConfig())).toBe(false)
+    expect(shouldWarnForOpenBind({ ...defaultServerConfig(), address: '100.64.0.1' })).toBe(true)
+    expect(shouldWarnForOpenBind({ ...defaultServerConfig(), address: '0.0.0.0' })).toBe(true)
+    expect(
+      shouldWarnForOpenBind({
+        ...defaultServerConfig(),
+        address: '0.0.0.0',
+        auth: {
+          mode: 'jwt',
+          jwt: {
+            publicKeys: [{ kid: 'test', algorithm: 'ES256', publicKeyPath: './test.pub' }],
+          },
+        },
+      }),
+    ).toBe(false)
+    expect(
+      shouldWarnForOpenBind({
+        ...defaultServerConfig(),
+        address: '0.0.0.0',
+        auth: {
+          mode: 'key',
+          jwt: {
+            publicKeys: [],
+          },
+        },
+      }),
+    ).toBe(false)
   })
 })
