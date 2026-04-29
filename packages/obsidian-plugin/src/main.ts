@@ -10,7 +10,8 @@ import {
 } from 'obsidian'
 import { startAccordWatcher, type AccordWatcher } from '@accord-kit/cli'
 import { decodeJoinToken, encodeJoinToken, isValidVaultId, normalizeDocumentId } from '@accord-kit/core'
-import { CursorPresenceManager } from './cursor-presence.js'
+import { CursorPresenceManager } from './cursor-presence'
+import { PluginLogger } from './logger'
 
 interface AccordKitSettings {
   serverUrl: string
@@ -57,8 +58,17 @@ export default class AccordKitPlugin extends Plugin {
   private watcherPromise: Promise<AccordWatcher | null> | null = null
   private restartTimer: NodeJS.Timeout | null = null
   private readonly presence = new CursorPresenceManager()
+  private logger: PluginLogger | null = null
 
   async onload(): Promise<void> {
+    if (this.manifest.dir) {
+      const { adapter } = this.app.vault
+      const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null
+      if (basePath) {
+        this.logger = new PluginLogger(`${basePath}/${this.manifest.dir}`)
+        this.logger.install()
+      }
+    }
     await this.loadSettings()
     this.statusBarItem = this.addStatusBarItem()
     this.addSettingTab(new AccordKitSettingTab(this.app, this))
@@ -79,6 +89,8 @@ export default class AccordKitPlugin extends Plugin {
   async onunload(): Promise<void> {
     this.presence.destroy()
     await this.teardownWatcher()
+    this.logger?.uninstall()
+    this.logger = null
   }
 
   async loadSettings(): Promise<void> {
